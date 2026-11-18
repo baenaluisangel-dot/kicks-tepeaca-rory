@@ -66,13 +66,15 @@ async def main():
 
         fotos_mandadas: list[str] = []
 
-        async def enviar_foto_simulada(producto_id: str) -> str:
+        async def enviar_foto_simulada(producto_id: str, todas: bool = False) -> str:
             producto = obtener_producto(producto_id)
             if not producto:
                 return f"ERROR: no existe el producto '{producto_id}'."
-            print(f"\n  [FOTO] {pie_de_foto(producto)}  ({producto['foto']})")
-            fotos_mandadas.append(producto["nombre"])
-            return f"OK: foto de {producto['nombre']} enviada."
+            rutas = producto["fotos"] if todas else producto["fotos"][:1]
+            for n, ruta in enumerate(rutas, 1):
+                print(f"\n  [FOTO] {pie_de_foto(producto, n, len(rutas))}  ({ruta})")
+            fotos_mandadas.append(producto["nombre"] + (f" ({len(rutas)} fotos)" if len(rutas) > 1 else ""))
+            return f"OK: {len(rutas)} foto(s) de {producto['nombre']} enviada(s)."
 
         print("\nAgente: ", end="", flush=True)
         respuesta, es_respuesta_real = await generar_respuesta(

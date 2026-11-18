@@ -4,608 +4,995 @@
   "nombre": "Toy Story Jessie con sonido",
   "precio": 840,
   "categoria": "Toy Story",
-  "foto": "toy-story-jessie-con-sonido.jpg"
+  "fotos": [
+   "toy-story-jessie-con-sonido/01.jpg",
+   "toy-story-jessie-con-sonido/02.jpg",
+   "toy-story-jessie-con-sonido/03.jpg"
+  ]
  },
  {
   "id": "toy-story-alien-17-cm",
   "nombre": "Toy Story Alien 17 cm",
   "precio": 350,
   "categoria": "Toy Story",
-  "foto": "toy-story-alien-17-cm.jpg"
+  "fotos": [
+   "toy-story-alien-17-cm/01.jpg",
+   "toy-story-alien-17-cm/02.jpg",
+   "toy-story-alien-17-cm/03.jpg"
+  ]
  },
  {
   "id": "toy-story-buzz-chico",
   "nombre": "Toy Story Buzz chico",
   "precio": 450,
   "categoria": "Toy Story",
-  "foto": "toy-story-buzz-chico.jpg"
+  "fotos": [
+   "toy-story-buzz-chico/01.jpg",
+   "toy-story-buzz-chico/02.jpg",
+   "toy-story-buzz-chico/03.jpg",
+   "toy-story-buzz-chico/04.jpg",
+   "toy-story-buzz-chico/05.jpg"
+  ]
  },
  {
   "id": "toy-story-buzz-con-alas",
   "nombre": "Toy Story Buzz con alas",
   "precio": 900,
   "categoria": "Toy Story",
-  "foto": "toy-story-buzz-con-alas.jpg"
+  "fotos": [
+   "toy-story-buzz-con-alas/01.jpg",
+   "toy-story-buzz-con-alas/02.jpg",
+   "toy-story-buzz-con-alas/03.jpg",
+   "toy-story-buzz-con-alas/04.jpg"
+  ]
  },
  {
   "id": "toy-story-duo-buzz-alien",
   "nombre": "Toy Story Dúo Buzz + Alien",
   "precio": 1150,
   "categoria": "Toy Story",
-  "foto": "toy-story-duo-buzz-alien.jpg"
+  "fotos": [
+   "toy-story-duo-buzz-alien/01.jpg",
+   "toy-story-duo-buzz-alien/02.jpg",
+   "toy-story-duo-buzz-alien/03.jpg",
+   "toy-story-duo-buzz-alien/04.jpg"
+  ]
  },
  {
   "id": "toy-story-duo-woody-y-buzz",
   "nombre": "Toy Story Dúo Woody y Buzz",
   "precio": 1250,
   "categoria": "Toy Story",
-  "foto": "toy-story-duo-woody-y-buzz.jpg"
+  "fotos": [
+   "toy-story-duo-woody-y-buzz/01.jpg",
+   "toy-story-duo-woody-y-buzz/02.jpg",
+   "toy-story-duo-woody-y-buzz/03.jpg"
+  ]
  },
  {
   "id": "toy-story-rex-que-habla",
   "nombre": "Toy Story Rex que habla",
   "precio": 640,
   "categoria": "Toy Story",
-  "foto": "toy-story-rex-que-habla.jpg"
+  "fotos": [
+   "toy-story-rex-que-habla/01.jpg",
+   "toy-story-rex-que-habla/02.jpg",
+   "toy-story-rex-que-habla/03.jpg"
+  ]
  },
  {
   "id": "toy-story-tiro-al-blanco-peluche",
   "nombre": "Toy Story Tiro al Blanco peluche",
   "precio": 850,
   "categoria": "Toy Story",
-  "foto": "toy-story-tiro-al-blanco-peluche.jpg"
+  "fotos": [
+   "toy-story-tiro-al-blanco-peluche/01.jpg",
+   "toy-story-tiro-al-blanco-peluche/02.jpg",
+   "toy-story-tiro-al-blanco-peluche/03.jpg",
+   "toy-story-tiro-al-blanco-peluche/04.jpg"
+  ]
  },
  {
   "id": "toy-story-woody-de-tela-que-habla",
   "nombre": "Toy Story Woody de tela que habla",
   "precio": 840,
   "categoria": "Toy Story",
-  "foto": "toy-story-woody-de-tela-que-habla.jpg"
+  "fotos": [
+   "toy-story-woody-de-tela-que-habla/01.jpg",
+   "toy-story-woody-de-tela-que-habla/02.jpg",
+   "toy-story-woody-de-tela-que-habla/03.jpg",
+   "toy-story-woody-de-tela-que-habla/04.jpg"
+  ]
  },
  {
   "id": "toy-story-carro-control-remoto-chico",
   "nombre": "Toy Story carro control remoto chico",
   "precio": 600,
   "categoria": "Toy Story",
-  "foto": "toy-story-carro-control-remoto-chico.jpg"
+  "fotos": [
+   "toy-story-carro-control-remoto-chico/01.jpg",
+   "toy-story-carro-control-remoto-chico/02.jpg",
+   "toy-story-carro-control-remoto-chico/03.jpg"
+  ]
  },
  {
   "id": "toy-story-carro-control-remoto-grande",
   "nombre": "Toy Story carro control remoto grande",
   "precio": 900,
   "categoria": "Toy Story",
-  "foto": "toy-story-carro-control-remoto-grande.jpg"
+  "fotos": [
+   "toy-story-carro-control-remoto-grande/01.jpg",
+   "toy-story-carro-control-remoto-grande/02.jpg",
+   "toy-story-carro-control-remoto-grande/03.jpg",
+   "toy-story-carro-control-remoto-grande/04.jpg"
+  ]
  },
  {
   "id": "cars-10-coches-de-friccion",
   "nombre": "Cars 10 coches de fricción",
   "precio": 285,
   "categoria": "Cars",
-  "foto": "cars-10-coches-de-friccion.jpg"
+  "fotos": [
+   "cars-10-coches-de-friccion/01.jpg",
+   "cars-10-coches-de-friccion/02.jpg",
+   "cars-10-coches-de-friccion/03.jpg",
+   "cars-10-coches-de-friccion/04.jpg"
+  ]
  },
  {
   "id": "cars-2-coches-rayo-y-storm-friccion",
   "nombre": "Cars 2 coches Rayo y Storm (fricción)",
   "precio": 80,
   "categoria": "Cars",
-  "foto": "cars-2-coches-rayo-y-storm-friccion.jpg"
+  "fotos": [
+   "cars-2-coches-rayo-y-storm-friccion/01.jpg",
+   "cars-2-coches-rayo-y-storm-friccion/02.jpg",
+   "cars-2-coches-rayo-y-storm-friccion/03.jpg",
+   "cars-2-coches-rayo-y-storm-friccion/04.jpg",
+   "cars-2-coches-rayo-y-storm-friccion/05.jpg",
+   "cars-2-coches-rayo-y-storm-friccion/06.jpg",
+   "cars-2-coches-rayo-y-storm-friccion/07.jpg",
+   "cars-2-coches-rayo-y-storm-friccion/08.jpg",
+   "cars-2-coches-rayo-y-storm-friccion/09.jpg"
+  ]
  },
  {
   "id": "cars-rayo-y-mate-friccion-grande",
   "nombre": "Cars Rayo y Mate (fricción grande)",
   "precio": 200,
   "categoria": "Cars",
-  "foto": "cars-rayo-y-mate-friccion-grande.jpg"
+  "fotos": [
+   "cars-rayo-y-mate-friccion-grande/01.jpg",
+   "cars-rayo-y-mate-friccion-grande/02.jpg"
+  ]
  },
  {
   "id": "cars-fabuloso-rayo-y-mate-friccion",
   "nombre": "Cars Fabuloso Rayo y Mate (fricción)",
   "precio": 175,
   "categoria": "Cars",
-  "foto": "cars-fabuloso-rayo-y-mate-friccion.jpg"
+  "fotos": [
+   "cars-fabuloso-rayo-y-mate-friccion/01.jpg",
+   "cars-fabuloso-rayo-y-mate-friccion/02.jpg",
+   "cars-fabuloso-rayo-y-mate-friccion/03.jpg",
+   "cars-fabuloso-rayo-y-mate-friccion/04.jpg"
+  ]
  },
  {
   "id": "cars-estacionamiento-con-elevador",
   "nombre": "Cars estacionamiento con elevador",
   "precio": 270,
   "categoria": "Cars",
-  "foto": "cars-estacionamiento-con-elevador.jpg"
+  "fotos": [
+   "cars-estacionamiento-con-elevador/01.jpg",
+   "cars-estacionamiento-con-elevador/02.jpg",
+   "cars-estacionamiento-con-elevador/03.jpg",
+   "cars-estacionamiento-con-elevador/04.jpg",
+   "cars-estacionamiento-con-elevador/05.jpg"
+  ]
  },
  {
   "id": "cars-set-taller-pits",
   "nombre": "Cars set taller (Pits)",
   "precio": 270,
   "categoria": "Cars",
-  "foto": "cars-set-taller-pits.jpg"
+  "fotos": [
+   "cars-set-taller-pits/01.jpg",
+   "cars-set-taller-pits/02.jpg",
+   "cars-set-taller-pits/03.jpg"
+  ]
  },
  {
   "id": "hot-wheels-go-garage",
   "nombre": "Hot Wheels Go Garage",
   "precio": 500,
   "categoria": "Hot Wheels",
-  "foto": "hot-wheels-go-garage.jpg"
+  "fotos": [
+   "hot-wheels-go-garage/01.jpg",
+   "hot-wheels-go-garage/02.jpg",
+   "hot-wheels-go-garage/03.jpg"
+  ]
  },
  {
   "id": "hot-wheels-racing-pista-f1",
   "nombre": "Hot Wheels Racing (pista F1)",
   "precio": 1400,
   "categoria": "Hot Wheels",
-  "foto": "hot-wheels-racing-pista-f1.jpg"
+  "fotos": [
+   "hot-wheels-racing-pista-f1/01.jpg",
+   "hot-wheels-racing-pista-f1/02.jpg",
+   "hot-wheels-racing-pista-f1/03.jpg"
+  ]
  },
  {
   "id": "hot-wheels-skate-2-tablas-con-tenis",
   "nombre": "Hot Wheels Skate 2 tablas con tenis",
   "precio": 110,
   "categoria": "Hot Wheels",
-  "foto": "hot-wheels-skate-2-tablas-con-tenis.jpg"
+  "fotos": [
+   "hot-wheels-skate-2-tablas-con-tenis/01.jpg",
+   "hot-wheels-skate-2-tablas-con-tenis/02.jpg"
+  ]
  },
  {
   "id": "hot-wheels-skate-paquete-de-4-tablas",
   "nombre": "Hot Wheels Skate paquete de 4 tablas",
   "precio": 190,
   "categoria": "Hot Wheels",
-  "foto": "hot-wheels-skate-paquete-de-4-tablas.jpg"
+  "fotos": [
+   "hot-wheels-skate-paquete-de-4-tablas/01.jpg"
+  ]
  },
  {
   "id": "hot-wheels-skate-tabla-con-tenis",
   "nombre": "Hot Wheels Skate tabla con tenis",
   "precio": 60,
   "categoria": "Hot Wheels",
-  "foto": "hot-wheels-skate-tabla-con-tenis.jpg"
+  "fotos": [
+   "hot-wheels-skate-tabla-con-tenis/01.jpg",
+   "hot-wheels-skate-tabla-con-tenis/02.jpg"
+  ]
  },
  {
   "id": "hot-wheels-turbina",
   "nombre": "Hot Wheels Turbina",
   "precio": 970,
   "categoria": "Hot Wheels",
-  "foto": "hot-wheels-turbina.jpg"
+  "fotos": [
+   "hot-wheels-turbina/01.jpg",
+   "hot-wheels-turbina/02.jpg",
+   "hot-wheels-turbina/03.jpg",
+   "hot-wheels-turbina/04.jpg"
+  ]
  },
  {
   "id": "hot-wheels-control-remoto",
   "nombre": "Hot Wheels control remoto",
   "precio": 590,
   "categoria": "Hot Wheels",
-  "foto": "hot-wheels-control-remoto.jpg"
+  "fotos": [
+   "hot-wheels-control-remoto/01.jpg",
+   "hot-wheels-control-remoto/02.jpg",
+   "hot-wheels-control-remoto/03.jpg"
+  ]
  },
  {
   "id": "hot-wheels-lanzador",
   "nombre": "Hot Wheels lanzador",
   "precio": 260,
   "categoria": "Hot Wheels",
-  "foto": "hot-wheels-lanzador.jpg"
+  "fotos": [
+   "hot-wheels-lanzador/01.jpg",
+   "hot-wheels-lanzador/02.jpg",
+   "hot-wheels-lanzador/03.jpg"
+  ]
  },
  {
   "id": "hot-wheels-lanzador-torre-electrica",
   "nombre": "Hot Wheels lanzador torre eléctrica",
   "precio": 250,
   "categoria": "Hot Wheels",
-  "foto": "hot-wheels-lanzador-torre-electrica.jpg"
+  "fotos": [
+   "hot-wheels-lanzador-torre-electrica/01.jpg",
+   "hot-wheels-lanzador-torre-electrica/02.jpg",
+   "hot-wheels-lanzador-torre-electrica/03.jpg",
+   "hot-wheels-lanzador-torre-electrica/04.jpg",
+   "hot-wheels-lanzador-torre-electrica/05.jpg",
+   "hot-wheels-lanzador-torre-electrica/06.jpg",
+   "hot-wheels-lanzador-torre-electrica/07.jpg"
+  ]
  },
  {
   "id": "hot-wheels-pista-mario-kart",
   "nombre": "Hot Wheels pista Mario Kart",
   "precio": 800,
   "categoria": "Hot Wheels",
-  "foto": "hot-wheels-pista-mario-kart.jpg"
+  "fotos": [
+   "hot-wheels-pista-mario-kart/01.jpg",
+   "hot-wheels-pista-mario-kart/02.jpg",
+   "hot-wheels-pista-mario-kart/03.jpg"
+  ]
  },
  {
   "id": "hot-wheels-trailer",
   "nombre": "Hot Wheels tráiler",
   "precio": 450,
   "categoria": "Hot Wheels",
-  "foto": "hot-wheels-trailer.jpg"
+  "fotos": [
+   "hot-wheels-trailer/01.jpg",
+   "hot-wheels-trailer/02.jpg",
+   "hot-wheels-trailer/03.jpg",
+   "hot-wheels-trailer/04.jpg"
+  ]
  },
  {
   "id": "stitch-con-rana-figura-de-coleccion",
   "nombre": "Stitch con rana (figura de colección)",
   "precio": 190,
   "categoria": "Stitch y muñecas",
-  "foto": "stitch-con-rana-figura-de-coleccion.jpg"
+  "fotos": [
+   "stitch-con-rana-figura-de-coleccion/01.jpg",
+   "stitch-con-rana-figura-de-coleccion/02.jpg",
+   "stitch-con-rana-figura-de-coleccion/03.jpg"
+  ]
  },
  {
   "id": "stitch-interactivo",
   "nombre": "Stitch interactivo",
   "precio": 650,
   "categoria": "Stitch y muñecas",
-  "foto": "stitch-interactivo.jpg"
+  "fotos": [
+   "stitch-interactivo/01.jpg",
+   "stitch-interactivo/02.jpg",
+   "stitch-interactivo/03.jpg",
+   "stitch-interactivo/04.jpg"
+  ]
  },
  {
   "id": "barbie-bailarina",
   "nombre": "Barbie Bailarina",
   "precio": 210,
   "categoria": "Stitch y muñecas",
-  "foto": "barbie-bailarina.jpg"
+  "fotos": [
+   "barbie-bailarina/01.jpg",
+   "barbie-bailarina/02.jpg",
+   "barbie-bailarina/03.jpg"
+  ]
  },
  {
   "id": "barbie-camper",
   "nombre": "Barbie Camper",
   "precio": 1900,
   "categoria": "Stitch y muñecas",
-  "foto": "barbie-camper.jpg"
+  "fotos": [
+   "barbie-camper/01.jpg",
+   "barbie-camper/02.jpg",
+   "barbie-camper/03.jpg",
+   "barbie-camper/04.jpg"
+  ]
  },
  {
   "id": "barbie-dani-hoyos",
   "nombre": "Barbie Dani hoyos",
   "precio": 550,
   "categoria": "Stitch y muñecas",
-  "foto": "barbie-dani-hoyos.jpg"
+  "fotos": [
+   "barbie-dani-hoyos/01.jpg",
+   "barbie-dani-hoyos/02.jpg",
+   "barbie-dani-hoyos/03.jpg"
+  ]
  },
  {
   "id": "barbie-dream-besties-malibu",
   "nombre": "Barbie Dream Besties Malibu",
   "precio": 230,
   "categoria": "Stitch y muñecas",
-  "foto": "barbie-dream-besties-malibu.jpg"
+  "fotos": [
+   "barbie-dream-besties-malibu/01.jpg",
+   "barbie-dream-besties-malibu/02.jpg",
+   "barbie-dream-besties-malibu/03.jpg",
+   "barbie-dream-besties-malibu/04.jpg"
+  ]
  },
  {
   "id": "barbie-dream-besties-renee",
   "nombre": "Barbie Dream Besties Renee",
   "precio": 230,
   "categoria": "Stitch y muñecas",
-  "foto": "barbie-dream-besties-renee.jpg"
+  "fotos": [
+   "barbie-dream-besties-renee/01.jpg",
+   "barbie-dream-besties-renee/02.jpg",
+   "barbie-dream-besties-renee/03.jpg",
+   "barbie-dream-besties-renee/04.jpg"
+  ]
  },
  {
   "id": "barbie-dream-besties-teresa",
   "nombre": "Barbie Dream Besties Teresa",
   "precio": 230,
   "categoria": "Stitch y muñecas",
-  "foto": "barbie-dream-besties-teresa.jpg"
+  "fotos": [
+   "barbie-dream-besties-teresa/01.jpg",
+   "barbie-dream-besties-teresa/02.jpg",
+   "barbie-dream-besties-teresa/03.jpg"
+  ]
  },
  {
   "id": "hello-sanrio-figura-toddler-surtido",
   "nombre": "Hello Sanrio figura toddler (surtido)",
   "precio": 380,
   "categoria": "Stitch y muñecas",
-  "foto": "hello-sanrio-figura-toddler-surtido.jpg"
+  "fotos": [
+   "hello-sanrio-figura-toddler-surtido/01.jpg",
+   "hello-sanrio-figura-toddler-surtido/02.jpg",
+   "hello-sanrio-figura-toddler-surtido/03.jpg",
+   "hello-sanrio-figura-toddler-surtido/04.jpg",
+   "hello-sanrio-figura-toddler-surtido/05.jpg"
+  ]
  },
  {
   "id": "snoopy-figura-toddler",
   "nombre": "Snoopy figura toddler",
   "precio": 650,
   "categoria": "Stitch y muñecas",
-  "foto": "snoopy-figura-toddler.jpg"
+  "fotos": [
+   "snoopy-figura-toddler/01.jpg",
+   "snoopy-figura-toddler/02.jpg",
+   "snoopy-figura-toddler/03.jpg"
+  ]
  },
  {
   "id": "fisher-price-andadera-pinguino",
   "nombre": "Fisher-Price andadera pingüino",
   "precio": 910,
   "categoria": "Preescolar y casita",
-  "foto": "fisher-price-andadera-pinguino.jpg"
+  "fotos": [
+   "fisher-price-andadera-pinguino/01.jpg",
+   "fisher-price-andadera-pinguino/02.jpg",
+   "fisher-price-andadera-pinguino/03.jpg",
+   "fisher-price-andadera-pinguino/04.jpg"
+  ]
  },
  {
   "id": "fisher-price-arcoiris",
   "nombre": "Fisher-Price arcoíris",
   "precio": 290,
   "categoria": "Preescolar y casita",
-  "foto": "fisher-price-arcoiris.jpg"
+  "fotos": [
+   "fisher-price-arcoiris/01.jpg",
+   "fisher-price-arcoiris/02.jpg"
+  ]
  },
  {
   "id": "fisher-price-caminadora-chanquito",
   "nombre": "Fisher-Price caminadora chanquito",
   "precio": 500,
   "categoria": "Preescolar y casita",
-  "foto": "fisher-price-caminadora-chanquito.jpg"
+  "fotos": [
+   "fisher-price-caminadora-chanquito/01.jpg",
+   "fisher-price-caminadora-chanquito/02.jpg",
+   "fisher-price-caminadora-chanquito/03.jpg"
+  ]
  },
  {
   "id": "fisher-price-formas",
   "nombre": "Fisher-Price formas",
   "precio": 180,
   "categoria": "Preescolar y casita",
-  "foto": "fisher-price-formas.jpg"
+  "fotos": [
+   "fisher-price-formas/01.jpg"
+  ]
  },
  {
   "id": "fisher-price-videojuego",
   "nombre": "Fisher-Price videojuego",
   "precio": 250,
   "categoria": "Preescolar y casita",
-  "foto": "fisher-price-videojuego.jpg"
+  "fotos": [
+   "fisher-price-videojuego/01.jpg",
+   "fisher-price-videojuego/02.jpg",
+   "fisher-price-videojuego/03.jpg"
+  ]
  },
  {
   "id": "fisher-price-xilofono",
   "nombre": "Fisher-Price xilófono",
   "precio": 360,
   "categoria": "Preescolar y casita",
-  "foto": "fisher-price-xilofono.jpg"
+  "fotos": [
+   "fisher-price-xilofono/01.jpg",
+   "fisher-price-xilofono/02.jpg",
+   "fisher-price-xilofono/03.jpg",
+   "fisher-price-xilofono/04.jpg"
+  ]
  },
  {
   "id": "fisher-price-xilofono-clasico",
   "nombre": "Fisher-Price xilófono clásico",
   "precio": 350,
   "categoria": "Preescolar y casita",
-  "foto": "fisher-price-xilofono-clasico.jpg"
+  "fotos": [
+   "fisher-price-xilofono-clasico/01.jpg",
+   "fisher-price-xilofono-clasico/02.jpg",
+   "fisher-price-xilofono-clasico/03.jpg",
+   "fisher-price-xilofono-clasico/04.jpg"
+  ]
  },
  {
   "id": "play-doh-peluquero",
   "nombre": "Play-Doh peluquero",
   "precio": 185,
   "categoria": "Preescolar y casita",
-  "foto": "play-doh-peluquero.jpg"
+  "fotos": [
+   "play-doh-peluquero/01.jpg",
+   "play-doh-peluquero/02.jpg",
+   "play-doh-peluquero/03.jpg"
+  ]
  },
  {
   "id": "stanley-jr-kit",
   "nombre": "Stanley Jr. kit",
   "precio": 500,
   "categoria": "Preescolar y casita",
-  "foto": "stanley-jr-kit.jpg"
+  "fotos": [
+   "stanley-jr-kit/01.jpg",
+   "stanley-jr-kit/02.jpg",
+   "stanley-jr-kit/03.jpg"
+  ]
  },
  {
   "id": "aspiradora-de-juguete",
   "nombre": "Aspiradora de juguete",
   "precio": 360,
   "categoria": "Preescolar y casita",
-  "foto": "aspiradora-de-juguete.jpg"
+  "fotos": [
+   "aspiradora-de-juguete/01.jpg",
+   "aspiradora-de-juguete/02.jpg",
+   "aspiradora-de-juguete/03.jpg",
+   "aspiradora-de-juguete/04.jpg"
+  ]
  },
  {
   "id": "rompecabezas-demon-slayer",
   "nombre": "Rompecabezas Demon Slayer",
   "precio": 220,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-demon-slayer.jpg"
+  "fotos": [
+   "rompecabezas-demon-slayer/01.jpg",
+   "rompecabezas-demon-slayer/02.jpg",
+   "rompecabezas-demon-slayer/03.jpg"
+  ]
  },
  {
   "id": "rompecabezas-marvel-1000-pzas",
   "nombre": "Rompecabezas Marvel 1000 pzas",
   "precio": 290,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-marvel-1000-pzas.jpg"
+  "fotos": [
+   "rompecabezas-marvel-1000-pzas/01.jpg",
+   "rompecabezas-marvel-1000-pzas/02.jpg",
+   "rompecabezas-marvel-1000-pzas/03.jpg"
+  ]
  },
  {
   "id": "rompecabezas-marvel-collage-1000-pzas",
   "nombre": "Rompecabezas Marvel Collage 1000 pzas",
   "precio": 310,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-marvel-collage-1000-pzas.jpg"
+  "fotos": [
+   "rompecabezas-marvel-collage-1000-pzas/01.jpg",
+   "rompecabezas-marvel-collage-1000-pzas/02.jpg",
+   "rompecabezas-marvel-collage-1000-pzas/03.jpg"
+  ]
  },
  {
   "id": "rompecabezas-spider-man-1000-pzas",
   "nombre": "Rompecabezas Spider-Man 1000 pzas",
   "precio": 290,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-spider-man-1000-pzas.jpg"
+  "fotos": [
+   "rompecabezas-spider-man-1000-pzas/01.jpg",
+   "rompecabezas-spider-man-1000-pzas/02.jpg",
+   "rompecabezas-spider-man-1000-pzas/03.jpg"
+  ]
  },
  {
   "id": "rompecabezas-snoopy-circular",
   "nombre": "Rompecabezas Snoopy circular",
   "precio": 230,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-snoopy-circular.jpg"
+  "fotos": [
+   "rompecabezas-snoopy-circular/01.jpg",
+   "rompecabezas-snoopy-circular/02.jpg",
+   "rompecabezas-snoopy-circular/03.jpg"
+  ]
  },
  {
   "id": "rompecabezas-spider-man-amazing",
   "nombre": "Rompecabezas Spider-Man Amazing",
   "precio": 230,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-spider-man-amazing.jpg"
+  "fotos": [
+   "rompecabezas-spider-man-amazing/01.jpg",
+   "rompecabezas-spider-man-amazing/02.jpg",
+   "rompecabezas-spider-man-amazing/03.jpg"
+  ]
  },
  {
   "id": "rompecabezas-cilindro-bluey",
   "nombre": "Rompecabezas cilindro Bluey",
   "precio": 150,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-cilindro-bluey.jpg"
+  "fotos": [
+   "rompecabezas-cilindro-bluey/01.jpg"
+  ]
  },
  {
   "id": "rompecabezas-cilindro-formula-1",
   "nombre": "Rompecabezas cilindro Fórmula 1",
   "precio": 150,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-cilindro-formula-1.jpg"
+  "fotos": [
+   "rompecabezas-cilindro-formula-1/01.jpg"
+  ]
  },
  {
   "id": "rompecabezas-cilindro-gato",
   "nombre": "Rompecabezas cilindro Gato",
   "precio": 150,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-cilindro-gato.jpg"
+  "fotos": [
+   "rompecabezas-cilindro-gato/01.jpg"
+  ]
  },
  {
   "id": "rompecabezas-cilindro-kitty",
   "nombre": "Rompecabezas cilindro Kitty",
   "precio": 150,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-cilindro-kitty.jpg"
+  "fotos": [
+   "rompecabezas-cilindro-kitty/01.jpg"
+  ]
  },
  {
   "id": "rompecabezas-cilindro-paris",
   "nombre": "Rompecabezas cilindro París",
   "precio": 150,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-cilindro-paris.jpg"
+  "fotos": [
+   "rompecabezas-cilindro-paris/01.jpg"
+  ]
  },
  {
   "id": "rompecabezas-cilindro-princesas",
   "nombre": "Rompecabezas cilindro Princesas",
   "precio": 150,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-cilindro-princesas.jpg"
+  "fotos": [
+   "rompecabezas-cilindro-princesas/01.jpg"
+  ]
  },
  {
   "id": "rompecabezas-cilindro-sonic",
   "nombre": "Rompecabezas cilindro Sonic",
   "precio": 150,
   "categoria": "Rompecabezas",
-  "foto": "rompecabezas-cilindro-sonic.jpg"
+  "fotos": [
+   "rompecabezas-cilindro-sonic/01.jpg",
+   "rompecabezas-cilindro-sonic/02.jpg"
+  ]
  },
  {
   "id": "bluey-boom",
   "nombre": "Bluey Boom",
   "precio": 190,
   "categoria": "Juegos de mesa",
-  "foto": "bluey-boom.jpg"
+  "fotos": [
+   "bluey-boom/01.jpg",
+   "bluey-boom/02.jpg"
+  ]
  },
  {
   "id": "bluey-fiesta-de-globos",
   "nombre": "Bluey Fiesta de globos",
   "precio": 215,
   "categoria": "Juegos de mesa",
-  "foto": "bluey-fiesta-de-globos.jpg"
+  "fotos": [
+   "bluey-fiesta-de-globos/01.jpg",
+   "bluey-fiesta-de-globos/02.jpg",
+   "bluey-fiesta-de-globos/03.jpg",
+   "bluey-fiesta-de-globos/04.jpg"
+  ]
  },
  {
   "id": "la-busqueda-mandalorian",
   "nombre": "La búsqueda Mandalorian",
   "precio": 180,
   "categoria": "Juegos de mesa",
-  "foto": "la-busqueda-mandalorian.jpg"
+  "fotos": [
+   "la-busqueda-mandalorian/01.jpg",
+   "la-busqueda-mandalorian/02.jpg"
+  ]
  },
  {
   "id": "maraton",
   "nombre": "Maratón",
   "precio": 250,
   "categoria": "Juegos de mesa",
-  "foto": "maraton.jpg"
+  "fotos": [
+   "maraton/01.jpg",
+   "maraton/02.jpg"
+  ]
  },
  {
   "id": "uno-star-wars",
   "nombre": "UNO Star Wars",
   "precio": 100,
   "categoria": "Juegos de mesa",
-  "foto": "uno-star-wars.jpg"
+  "fotos": [
+   "uno-star-wars/01.jpg",
+   "uno-star-wars/02.jpg",
+   "uno-star-wars/03.jpg",
+   "uno-star-wars/04.jpg",
+   "uno-star-wars/05.jpg"
+  ]
  },
  {
   "id": "uno-trolls",
   "nombre": "UNO Trolls",
   "precio": 100,
   "categoria": "Juegos de mesa",
-  "foto": "uno-trolls.jpg"
+  "fotos": [
+   "uno-trolls/01.jpg",
+   "uno-trolls/02.jpg",
+   "uno-trolls/03.jpg",
+   "uno-trolls/04.jpg"
+  ]
  },
  {
   "id": "uno-mattel",
   "nombre": "UNO Mattel",
   "precio": 110,
   "categoria": "Juegos de mesa",
-  "foto": "uno-mattel.jpg"
+  "fotos": [
+   "uno-mattel/01.jpg",
+   "uno-mattel/02.jpg",
+   "uno-mattel/03.jpg",
+   "uno-mattel/04.jpg",
+   "uno-mattel/05.jpg"
+  ]
  },
  {
   "id": "uno-platinum",
   "nombre": "UNO Platinum",
   "precio": 110,
   "categoria": "Juegos de mesa",
-  "foto": "uno-platinum.jpg"
+  "fotos": [
+   "uno-platinum/01.jpg",
+   "uno-platinum/02.jpg",
+   "uno-platinum/03.jpg",
+   "uno-platinum/04.jpg",
+   "uno-platinum/05.jpg"
+  ]
  },
  {
   "id": "scooter-bluey",
   "nombre": "Scooter Bluey",
   "precio": 500,
   "categoria": "Scooters",
-  "foto": "scooter-bluey.jpg"
+  "fotos": [
+   "scooter-bluey/01.jpg",
+   "scooter-bluey/02.jpg",
+   "scooter-bluey/03.jpg",
+   "scooter-bluey/04.jpg",
+   "scooter-bluey/05.jpg"
+  ]
  },
  {
   "id": "scooter-cars",
   "nombre": "Scooter Cars",
   "precio": 500,
   "categoria": "Scooters",
-  "foto": "scooter-cars.jpg"
+  "fotos": [
+   "scooter-cars/01.jpg",
+   "scooter-cars/02.jpg",
+   "scooter-cars/03.jpg",
+   "scooter-cars/04.jpg",
+   "scooter-cars/05.jpg"
+  ]
  },
  {
   "id": "scooter-minnie",
   "nombre": "Scooter Minnie",
   "precio": 500,
   "categoria": "Scooters",
-  "foto": "scooter-minnie.jpg"
+  "fotos": [
+   "scooter-minnie/01.jpg",
+   "scooter-minnie/02.jpg",
+   "scooter-minnie/03.jpg"
+  ]
  },
  {
   "id": "scooter-princesas",
   "nombre": "Scooter Princesas",
   "precio": 500,
   "categoria": "Scooters",
-  "foto": "scooter-princesas.jpg"
+  "fotos": [
+   "scooter-princesas/01.jpg",
+   "scooter-princesas/02.jpg",
+   "scooter-princesas/03.jpg",
+   "scooter-princesas/04.jpg",
+   "scooter-princesas/05.jpg"
+  ]
  },
  {
   "id": "scooter-stitch",
   "nombre": "Scooter Stitch",
   "precio": 500,
   "categoria": "Scooters",
-  "foto": "scooter-stitch.jpg"
+  "fotos": [
+   "scooter-stitch/01.jpg",
+   "scooter-stitch/02.jpg",
+   "scooter-stitch/03.jpg"
+  ]
  },
  {
   "id": "scooter-toy-story",
   "nombre": "Scooter Toy Story",
   "precio": 500,
   "categoria": "Scooters",
-  "foto": "scooter-toy-story.jpg"
+  "fotos": [
+   "scooter-toy-story/01.jpg",
+   "scooter-toy-story/02.jpg",
+   "scooter-toy-story/03.jpg",
+   "scooter-toy-story/04.jpg",
+   "scooter-toy-story/05.jpg"
+  ]
  },
  {
   "id": "moto-ducati-1-6",
   "nombre": "Moto Ducati 1:6",
   "precio": 900,
   "categoria": "Figuras, acción y más",
-  "foto": "moto-ducati-1-6.jpg"
+  "fotos": [
+   "moto-ducati-1-6/01.jpg",
+   "moto-ducati-1-6/02.jpg",
+   "moto-ducati-1-6/03.jpg",
+   "moto-ducati-1-6/04.jpg"
+  ]
  },
  {
   "id": "minecraft-espada",
   "nombre": "Minecraft espada",
   "precio": 270,
   "categoria": "Figuras, acción y más",
-  "foto": "minecraft-espada.jpg"
+  "fotos": [
+   "minecraft-espada/01.jpg",
+   "minecraft-espada/02.jpg"
+  ]
  },
  {
   "id": "minecraft-pico",
   "nombre": "Minecraft pico",
   "precio": 270,
   "categoria": "Figuras, acción y más",
-  "foto": "minecraft-pico.jpg"
+  "fotos": [
+   "minecraft-pico/01.jpg",
+   "minecraft-pico/02.jpg",
+   "minecraft-pico/03.jpg"
+  ]
  },
  {
   "id": "arena-magica-bote",
   "nombre": "Arena mágica (bote)",
   "precio": 180,
   "categoria": "Figuras, acción y más",
-  "foto": "arena-magica-bote.jpg"
+  "fotos": [
+   "arena-magica-bote/01.jpg",
+   "arena-magica-bote/02.jpg",
+   "arena-magica-bote/03.jpg"
+  ]
  },
  {
   "id": "imaginext-darth-vader-bot",
   "nombre": "Imaginext Darth Vader Bot",
   "precio": 1500,
   "categoria": "Figuras, acción y más",
-  "foto": "imaginext-darth-vader-bot.jpg"
+  "fotos": [
+   "imaginext-darth-vader-bot/01.jpg",
+   "imaginext-darth-vader-bot/02.jpg",
+   "imaginext-darth-vader-bot/03.jpg",
+   "imaginext-darth-vader-bot/04.jpg",
+   "imaginext-darth-vader-bot/05.jpg",
+   "imaginext-darth-vader-bot/06.jpg",
+   "imaginext-darth-vader-bot/07.jpg",
+   "imaginext-darth-vader-bot/08.jpg"
+  ]
  },
  {
   "id": "jurassic-world-reveal",
   "nombre": "Jurassic World Reveal",
   "precio": 300,
   "categoria": "Figuras, acción y más",
-  "foto": "jurassic-world-reveal.jpg"
+  "fotos": [
+   "jurassic-world-reveal/01.jpg",
+   "jurassic-world-reveal/02.jpg",
+   "jurassic-world-reveal/03.jpg",
+   "jurassic-world-reveal/04.jpg"
+  ]
  },
  {
   "id": "jurassic-world-blue-con-sonido-chico",
   "nombre": "Jurassic World Blue con sonido (chico)",
   "precio": 250,
   "categoria": "Figuras, acción y más",
-  "foto": "jurassic-world-blue-con-sonido-chico.jpg"
+  "fotos": [
+   "jurassic-world-blue-con-sonido-chico/01.jpg",
+   "jurassic-world-blue-con-sonido-chico/02.jpg",
+   "jurassic-world-blue-con-sonido-chico/03.jpg",
+   "jurassic-world-blue-con-sonido-chico/04.jpg"
+  ]
  },
  {
   "id": "jurassic-world-indominus-o-t-rex-grande",
   "nombre": "Jurassic World Indominus o T-Rex (grande)",
   "precio": 300,
   "categoria": "Figuras, acción y más",
-  "foto": "jurassic-world-indominus-o-t-rex-grande.jpg"
+  "fotos": [
+   "jurassic-world-indominus-o-t-rex-grande/01.jpg",
+   "jurassic-world-indominus-o-t-rex-grande/02.jpg",
+   "jurassic-world-indominus-o-t-rex-grande/03.jpg",
+   "jurassic-world-indominus-o-t-rex-grande/04.jpg",
+   "jurassic-world-indominus-o-t-rex-grande/05.jpg",
+   "jurassic-world-indominus-o-t-rex-grande/06.jpg",
+   "jurassic-world-indominus-o-t-rex-grande/07.jpg",
+   "jurassic-world-indominus-o-t-rex-grande/08.jpg"
+  ]
  },
  {
   "id": "jurassic-world-mascara-basica",
   "nombre": "Jurassic World máscara básica",
   "precio": 300,
   "categoria": "Figuras, acción y más",
-  "foto": "jurassic-world-mascara-basica.jpg"
+  "fotos": [
+   "jurassic-world-mascara-basica/01.jpg",
+   "jurassic-world-mascara-basica/02.jpg",
+   "jurassic-world-mascara-basica/03.jpg",
+   "jurassic-world-mascara-basica/04.jpg",
+   "jurassic-world-mascara-basica/05.jpg"
+  ]
  },
  {
   "id": "nerf",
   "nombre": "Nerf",
   "precio": 220,
   "categoria": "Figuras, acción y más",
-  "foto": "nerf.jpg"
+  "fotos": [
+   "nerf/01.jpg",
+   "nerf/02.jpg",
+   "nerf/03.jpg"
+  ]
  },
  {
   "id": "spider-man-pirata",
   "nombre": "Spider-Man pirata",
   "precio": 240,
   "categoria": "Figuras, acción y más",
-  "foto": "spider-man-pirata.jpg"
+  "fotos": [
+   "spider-man-pirata/01.jpg",
+   "spider-man-pirata/02.jpg",
+   "spider-man-pirata/03.jpg"
+  ]
  },
  {
   "id": "x-shot-insanity",
   "nombre": "X-Shot Insanity",
   "precio": 240,
   "categoria": "Figuras, acción y más",
-  "foto": "x-shot-insanity.jpg"
+  "fotos": [
+   "x-shot-insanity/01.jpg",
+   "x-shot-insanity/02.jpg",
+   "x-shot-insanity/03.jpg"
+  ]
  }
 ]

@@ -42,14 +42,16 @@ MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS") or "4096")
 _soporta_esfuerzo = True
 
 # Herramienta para mandar la foto de un producto del catalogo por WhatsApp.
-MAX_FOTOS_POR_RESPUESTA = 3
+MAX_FOTOS_POR_RESPUESTA = 6   # tope de fotos sueltas por respuesta (lo aplica main.py)
 MAX_VUELTAS_HERRAMIENTAS = 5
 HERRAMIENTA_FOTO = {
     "name": "enviar_foto",
     "description": (
-        "Envia al cliente por WhatsApp la foto real de un producto del catalogo, con su "
-        "nombre y precio. Usala cuando el cliente pida ver fotos o cuando le muestres opciones. "
-        f"Maximo {MAX_FOTOS_POR_RESPUESTA} fotos por respuesta."
+        "Envia al cliente por WhatsApp fotos reales de un producto del catalogo, con su nombre "
+        "y precio. Por defecto manda solo la foto principal (para mostrar opciones). Con "
+        "todas=true manda todas las fotos del producto desde distintos angulos (para cuando el "
+        "cliente quiere verlo a detalle o pide mas fotos). "
+        f"Maximo {MAX_FOTOS_POR_RESPUESTA} fotos en total por respuesta."
     ),
     "input_schema": {
         "type": "object",
@@ -58,7 +60,11 @@ HERRAMIENTA_FOTO = {
                 "type": "string",
                 "enum": ids_validos(),
                 "description": "Id del producto, tal cual aparece entre corchetes en el catalogo.",
-            }
+            },
+            "todas": {
+                "type": "boolean",
+                "description": "true = mandar todas las fotos del producto; false (default) = solo la principal.",
+            },
         },
         "required": ["producto_id"],
     },
@@ -195,12 +201,12 @@ async def generar_respuesta(
             if bloque.type != "tool_use":
                 continue
             if bloque.name == "enviar_foto" and enviar_foto:
-                if fotos_enviadas >= MAX_FOTOS_POR_RESPUESTA:
-                    resultado = "Ya se mandaron suficientes fotos en este mensaje. No mandes mas."
-                else:
-                    resultado = await enviar_foto((bloque.input or {}).get("producto_id", ""))
-                    if resultado.startswith("OK"):
-                        fotos_enviadas += 1
+                datos = bloque.input or {}
+                resultado = await enviar_foto(
+                    datos.get("producto_id", ""), bool(datos.get("todas", False))
+                )
+                if resultado.startswith("OK"):
+                    fotos_enviadas += 1
             else:
                 resultado = "Herramienta no disponible."
             resultados.append(

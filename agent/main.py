@@ -17,7 +17,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from agent.brain import generar_respuesta, obtener_mensaje_error
+from agent.brain import MAX_FOTOS_POR_RESPUESTA, generar_respuesta, obtener_mensaje_error
 from agent.catalogo import obtener_producto, pie_de_foto, url_foto
 from agent.memory import (
     guardar_mensaje,
@@ -184,22 +184,41 @@ async def procesar_mensaje(msg: MensajeEntrante):
             # el mensaje nuevo al final, y asi no queda duplicado.
             historial = await obtener_historial(msg.telefono)
 
-            fotos_mandadas: list[str] = []
+            fotos_mandadas: list[str] = []   # nombres de productos, para la nota del historial
+            contador = {"fotos": 0}          # fotos enviadas en esta respuesta
 
-            async def enviar_foto(producto_id: str) -> str:
-                """La usa Claude (herramienta enviar_foto) para mandar la foto de un producto."""
+            async def enviar_foto(producto_id: str, todas: bool = False) -> str:
+                """La usa Claude (herramienta enviar_foto) para mandar fotos de un producto."""
                 producto = obtener_producto(producto_id)
                 if not producto:
                     return f"ERROR: no existe el producto '{producto_id}'."
-                url = url_foto(producto)
-                if not url:
-                    return "ERROR: no hay URL publica configurada para las fotos."
-                ok = await proveedor.enviar_imagen(
-                    msg.telefono, url, pie_de_foto(producto), msg.contexto
-                )
-                if ok:
-                    fotos_mandadas.append(producto["nombre"])
-                    return f"OK: foto de {producto['nombre']} enviada."
+                rutas = producto.get("fotos") or []
+                if not rutas:
+                    return "ERROR: ese producto no tiene fotos. Ofrece que el equipo se las manda."
+                if not todas:
+                    rutas = rutas[:1]
+                rutas = rutas[: MAX_FOTOS_POR_RESPUESTA - contador["fotos"]]
+                if not rutas:
+                    return "ERROR: ya se mandaron suficientes fotos en este mensaje. No mandes mas."
+
+                total = len(producto["fotos"]) if todas else 1
+                enviadas = 0
+                for n, ruta in enumerate(rutas, 1):
+                    url = url_foto(ruta)
+                    if not url:
+                        return "ERROR: no hay URL publica configurada para las fotos."
+                    ok = await proveedor.enviar_imagen(
+                        msg.telefono, url, pie_de_foto(producto, n, total), msg.contexto
+                    )
+                    if not ok:
+                        break
+                    enviadas += 1
+                    contador["fotos"] += 1
+                if enviadas:
+                    fotos_mandadas.append(
+                        producto["nombre"] + (f" ({enviadas} fotos)" if enviadas > 1 else "")
+                    )
+                    return f"OK: {enviadas} foto(s) de {producto['nombre']} enviada(s)."
                 return "ERROR: no se pudo enviar la foto. Ofrece que el equipo se la manda."
 
             respuesta, es_respuesta_real = await generar_respuesta(

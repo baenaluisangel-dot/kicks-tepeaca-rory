@@ -46,12 +46,16 @@ def url_base() -> str:
     return base.rstrip("/")
 
 
-def url_foto(producto: dict) -> str | None:
+def url_foto(ruta_foto: str) -> str | None:
+    """URL publica de una foto (ruta relativa a static/fotos, ej: 'buzz/01.jpg')."""
     base = url_base()
-    if not base or not producto.get("foto"):
+    if not base or not ruta_foto:
         return None
-    return f"{base}/fotos/{producto['foto']}"
+    return f"{base}/fotos/{ruta_foto}"
 
 
-def pie_de_foto(producto: dict) -> str:
-    return f"{producto['nombre']} — ${producto['precio']:,}"
+def pie_de_foto(producto: dict, numero: int = 1, total: int = 1) -> str:
+    texto = f"{producto['nombre']} — ${producto['precio']:,}"
+    if total > 1 and numero > 1:
+        texto += f" ({numero}/{total})"
+    return texto
