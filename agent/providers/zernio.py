@@ -196,7 +196,11 @@ class ProveedorZernio(ProveedorWhatsApp):
         evento_id = contexto.get("evento_id")
         if evento_id:
             # Una clave distinta por foto, para que no choque con la del texto ni con otras fotos
-            headers["Idempotency-Key"] = f"agentkit-{evento_id}-{url.rsplit('/', 1)[-1]}"
+            # Se usa la ruta completa de la foto (ej: buzz-chico/01.jpg), no solo el nombre del
+            # archivo: muchas fotos se llaman igual (01.jpg) y Zernio rechaza con 422 si la
+            # misma clave se reutiliza con una solicitud distinta.
+            ruta = url.split("/fotos/", 1)[-1].replace("/", "-")
+            headers["Idempotency-Key"] = f"agentkit-{evento_id}-{ruta}"
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as cliente:
