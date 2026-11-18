@@ -76,9 +76,14 @@ async def main():
             fotos_mandadas.append(producto["nombre"] + (f" ({len(rutas)} fotos)" if len(rutas) > 1 else ""))
             return f"OK: {len(rutas)} foto(s) de {producto['nombre']} enviada(s)."
 
+        async def enviar_catalogo_simulado() -> str:
+            print("\n  [PDF] Catalogo_Juguetes_Kicks_Tepeaca.pdf")
+            fotos_mandadas.append("el catálogo de juguetes en PDF")
+            return "OK: catalogo en PDF enviado."
+
         print("\nAgente: ", end="", flush=True)
         respuesta, es_respuesta_real = await generar_respuesta(
-            mensaje, historial, enviar_foto_simulada
+            mensaje, historial, enviar_foto_simulada, enviar_catalogo_simulado
         )
         print(respuesta)
         print()
@@ -87,7 +92,7 @@ async def main():
         if es_respuesta_real:
             await guardar_mensaje(TELEFONO_TEST, "user", mensaje)
             nota = (
-                f"\n[Nota interna: en este mensaje se enviaron las fotos de: {', '.join(fotos_mandadas)}]"
+                f"\n[Nota interna: en este mensaje se enviaron estos archivos: {', '.join(fotos_mandadas)}]"
                 if fotos_mandadas
                 else ""
             )

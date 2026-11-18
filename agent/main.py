@@ -18,7 +18,13 @@ from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent.brain import MAX_FOTOS_POR_RESPUESTA, generar_respuesta, obtener_mensaje_error
-from agent.catalogo import obtener_producto, pie_de_foto, url_foto
+from agent.catalogo import (
+    ARCHIVO_CATALOGO_PDF,
+    obtener_producto,
+    pie_de_foto,
+    url_catalogo_pdf,
+    url_foto,
+)
 from agent.memory import (
     guardar_mensaje,
     inicializar_db,
@@ -90,6 +96,8 @@ app = FastAPI(title="AgentKit — WhatsApp AI Agent", version="2.0.0", lifespan=
 
 # Fotos de los productos. WhatsApp las descarga de aqui, asi que tienen que ser publicas.
 app.mount("/fotos", StaticFiles(directory="static/fotos"), name="fotos")
+# Catalogo de juguetes en PDF (se manda como documento cuando lo piden).
+app.mount("/catalogo", StaticFiles(directory="static/catalogo"), name="catalogo")
 
 
 @app.get("/")
@@ -221,8 +229,25 @@ async def procesar_mensaje(msg: MensajeEntrante):
                     return f"OK: {enviadas} foto(s) de {producto['nombre']} enviada(s)."
                 return "ERROR: no se pudo enviar la foto. Ofrece que el equipo se la manda."
 
+            async def enviar_catalogo() -> str:
+                """La usa Claude (herramienta enviar_catalogo) para mandar el PDF del catalogo."""
+                url = url_catalogo_pdf()
+                if not url:
+                    return "ERROR: no hay URL publica configurada para el catalogo."
+                ok = await proveedor.enviar_documento(
+                    msg.telefono,
+                    url,
+                    ARCHIVO_CATALOGO_PDF,
+                    "Catálogo de juguetes de Kicks Tepeaca 🎁",
+                    msg.contexto,
+                )
+                if ok:
+                    fotos_mandadas.append("el catálogo de juguetes en PDF")
+                    return "OK: catalogo en PDF enviado."
+                return "ERROR: no se pudo enviar el PDF. Ofrece que el equipo se lo manda."
+
             respuesta, es_respuesta_real = await generar_respuesta(
-                msg.texto, historial, enviar_foto
+                msg.texto, historial, enviar_foto, enviar_catalogo
             )
 
             enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto)
@@ -244,7 +269,7 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 # El historial solo guarda texto: anotamos las fotos que se mandaron para
                 # que Rory sepa despues que ya las envio (y cuales).
                 nota = (
-                    f"\n[Nota interna: en este mensaje se enviaron las fotos de: {', '.join(fotos_mandadas)}]"
+                    f"\n[Nota interna: en este mensaje se enviaron estos archivos: {', '.join(fotos_mandadas)}]"
                     if fotos_mandadas
                     else ""
                 )

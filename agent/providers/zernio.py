@@ -223,6 +223,48 @@ class ProveedorZernio(ProveedorWhatsApp):
         logger.error(f"Zernio rechazo la imagen [{r.status_code}]: {r.text[:500]}")
         return False
 
+    async def enviar_documento(
+        self, telefono: str, url: str, nombre_archivo: str, texto: str, contexto: dict | None = None
+    ) -> bool:
+        """Manda un documento (por ejemplo el catalogo en PDF). La URL debe ser publica."""
+        contexto = contexto or {}
+        conversation_id = contexto.get("conversation_id")
+        account_id = contexto.get("account_id") or self.account_id
+
+        if not self.api_key or not conversation_id or not account_id:
+            logger.error("No se puede enviar el documento: faltan API key, conversation_id o account_id")
+            return False
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        evento_id = contexto.get("evento_id")
+        if evento_id:
+            headers["Idempotency-Key"] = f"agentkit-{evento_id}-doc-{nombre_archivo}"
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as cliente:
+                r = await cliente.post(
+                    f"{self.base_url}/inbox/conversations/{conversation_id}/messages",
+                    json={
+                        "accountId": account_id,
+                        "message": texto,
+                        "attachmentUrl": url,
+                        "attachmentType": "file",
+                        "attachmentName": nombre_archivo,
+                    },
+                    headers=headers,
+                )
+        except httpx.HTTPError as e:
+            logger.error(f"Error de red mandando documento a Zernio: {e}")
+            return False
+
+        if r.status_code == 200:
+            return True
+        logger.error(f"Zernio rechazo el documento [{r.status_code}]: {r.text[:500]}")
+        return False
+
     # ── Diagnostico ──────────────────────────────────────────────────────
 
     async def verificar_conexion(self) -> tuple[bool, str]:

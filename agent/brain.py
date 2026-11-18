@@ -71,6 +71,18 @@ HERRAMIENTA_FOTO = {
 }
 
 
+HERRAMIENTA_CATALOGO = {
+    "name": "enviar_catalogo",
+    "description": (
+        "Envia al cliente por WhatsApp el catalogo completo de juguetes de Kicks Tepeaca en "
+        "PDF (con fotos y precios de todos los juguetes). Usala cuando el cliente pida el "
+        "catalogo, la lista completa, 'todo lo que tienen' o ver todos los juguetes. "
+        "Mandalo una sola vez por conversacion salvo que lo pidan de nuevo."
+    ),
+    "input_schema": {"type": "object", "properties": {}},
+}
+
+
 def cargar_config_prompts() -> dict:
     """Lee toda la configuracion desde config/prompts.yaml."""
     try:
@@ -130,7 +142,7 @@ def _es_error_de_esfuerzo(error: Exception) -> bool:
 
 
 async def generar_respuesta(
-    mensaje: str, historial: list[dict], enviar_foto=None
+    mensaje: str, historial: list[dict], enviar_foto=None, enviar_catalogo=None
 ) -> tuple[str, bool]:
     """
     Genera una respuesta con Claude.
@@ -161,8 +173,13 @@ async def generar_respuesta(
     extras = {"output_config": {"effort": ESFUERZO}} if (_soporta_esfuerzo and ESFUERZO) else {}
 
     async def _llamar(parametros_extra: dict):
+        herramientas = []
         if enviar_foto:
-            parametros_extra = {**parametros_extra, "tools": [HERRAMIENTA_FOTO]}
+            herramientas.append(HERRAMIENTA_FOTO)
+        if enviar_catalogo:
+            herramientas.append(HERRAMIENTA_CATALOGO)
+        if herramientas:
+            parametros_extra = {**parametros_extra, "tools": herramientas}
         return await client.messages.create(
             model=MODELO,
             max_tokens=MAX_TOKENS,
@@ -205,6 +222,10 @@ async def generar_respuesta(
                 resultado = await enviar_foto(
                     datos.get("producto_id", ""), bool(datos.get("todas", False))
                 )
+                if resultado.startswith("OK"):
+                    fotos_enviadas += 1
+            elif bloque.name == "enviar_catalogo" and enviar_catalogo:
+                resultado = await enviar_catalogo()
                 if resultado.startswith("OK"):
                     fotos_enviadas += 1
             else:

@@ -59,3 +59,14 @@ def pie_de_foto(producto: dict, numero: int = 1, total: int = 1) -> str:
     if total > 1 and numero > 1:
         texto += f" ({numero}/{total})"
     return texto
+
+
+ARCHIVO_CATALOGO_PDF = "Catalogo_Juguetes_Kicks_Tepeaca.pdf"
+
+
+def url_catalogo_pdf() -> str | None:
+    """URL publica del PDF del catalogo de juguetes (vive en static/catalogo)."""
+    base = url_base()
+    if not base:
+        return None
+    return f"{base}/catalogo/{ARCHIVO_CATALOGO_PDF}"
