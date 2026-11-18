@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent.brain import generar_respuesta  # noqa: E402
+from agent.catalogo import obtener_producto, pie_de_foto  # noqa: E402
 from agent.memory import (  # noqa: E402
     guardar_mensaje,
     inicializar_db,
@@ -63,15 +64,32 @@ async def main():
         # El historial se lee ANTES de guardar (brain.py agrega el mensaje actual)
         historial = await obtener_historial(TELEFONO_TEST)
 
+        fotos_mandadas: list[str] = []
+
+        async def enviar_foto_simulada(producto_id: str) -> str:
+            producto = obtener_producto(producto_id)
+            if not producto:
+                return f"ERROR: no existe el producto '{producto_id}'."
+            print(f"\n  [FOTO] {pie_de_foto(producto)}  ({producto['foto']})")
+            fotos_mandadas.append(producto["nombre"])
+            return f"OK: foto de {producto['nombre']} enviada."
+
         print("\nAgente: ", end="", flush=True)
-        respuesta, es_respuesta_real = await generar_respuesta(mensaje, historial)
+        respuesta, es_respuesta_real = await generar_respuesta(
+            mensaje, historial, enviar_foto_simulada
+        )
         print(respuesta)
         print()
 
         # Igual que en produccion: los avisos tecnicos no entran al historial
         if es_respuesta_real:
             await guardar_mensaje(TELEFONO_TEST, "user", mensaje)
-            await guardar_mensaje(TELEFONO_TEST, "assistant", respuesta)
+            nota = (
+                f"\n[Nota interna: en este mensaje se enviaron las fotos de: {', '.join(fotos_mandadas)}]"
+                if fotos_mandadas
+                else ""
+            )
+            await guardar_mensaje(TELEFONO_TEST, "assistant", respuesta + nota)
 
 
 if __name__ == "__main__":

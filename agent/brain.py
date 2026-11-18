@@ -13,6 +13,8 @@ import yaml
 from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 
+from agent.catalogo import ids_validos
+
 load_dotenv()
 logger = logging.getLogger("agentkit")
 
@@ -38,6 +40,29 @@ MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS") or "4096")
 # Los modelos mas viejos no aceptan output_config. Si la primera llamada falla por eso,
 # se reintenta sin el parametro y se recuerda para las siguientes.
 _soporta_esfuerzo = True
+
+# Herramienta para mandar la foto de un producto del catalogo por WhatsApp.
+MAX_FOTOS_POR_RESPUESTA = 3
+MAX_VUELTAS_HERRAMIENTAS = 5
+HERRAMIENTA_FOTO = {
+    "name": "enviar_foto",
+    "description": (
+        "Envia al cliente por WhatsApp la foto real de un producto del catalogo, con su "
+        "nombre y precio. Usala cuando el cliente pida ver fotos o cuando le muestres opciones. "
+        f"Maximo {MAX_FOTOS_POR_RESPUESTA} fotos por respuesta."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "producto_id": {
+                "type": "string",
+                "enum": ids_validos(),
+                "description": "Id del producto, tal cual aparece entre corchetes en el catalogo.",
+            }
+        },
+        "required": ["producto_id"],
+    },
+}
 
 
 def cargar_config_prompts() -> dict:
@@ -98,13 +123,17 @@ def _es_error_de_esfuerzo(error: Exception) -> bool:
     return "output_config" in texto or "effort" in texto
 
 
-async def generar_respuesta(mensaje: str, historial: list[dict]) -> tuple[str, bool]:
+async def generar_respuesta(
+    mensaje: str, historial: list[dict], enviar_foto=None
+) -> tuple[str, bool]:
     """
     Genera una respuesta con Claude.
 
     Args:
         mensaje: el mensaje nuevo del cliente
         historial: los mensajes anteriores, [{"role": "user"|"assistant", "content": "..."}]
+        enviar_foto: funcion async opcional, enviar_foto(producto_id) -> str. Si se pasa,
+            Claude puede mandar fotos de productos; devuelve el resultado como texto.
 
     Returns:
         (texto, es_respuesta_real)
@@ -126,6 +155,8 @@ async def generar_respuesta(mensaje: str, historial: list[dict]) -> tuple[str, b
     extras = {"output_config": {"effort": ESFUERZO}} if (_soporta_esfuerzo and ESFUERZO) else {}
 
     async def _llamar(parametros_extra: dict):
+        if enviar_foto:
+            parametros_extra = {**parametros_extra, "tools": [HERRAMIENTA_FOTO]}
         return await client.messages.create(
             model=MODELO,
             max_tokens=MAX_TOKENS,
@@ -151,6 +182,38 @@ async def generar_respuesta(mensaje: str, historial: list[dict]) -> tuple[str, b
             logger.error(f"Error llamando a Claude: {e}")
             return obtener_mensaje_error(), False
 
+    # Ciclo de herramientas: si Claude pide mandar una foto, la mandamos y le contamos
+    # el resultado para que redacte la respuesta final.
+    fotos_enviadas = 0
+    for _ in range(MAX_VUELTAS_HERRAMIENTAS):
+        if getattr(respuesta, "stop_reason", None) != "tool_use":
+            break
+
+        mensajes.append({"role": "assistant", "content": respuesta.content})
+        resultados = []
+        for bloque in respuesta.content:
+            if bloque.type != "tool_use":
+                continue
+            if bloque.name == "enviar_foto" and enviar_foto:
+                if fotos_enviadas >= MAX_FOTOS_POR_RESPUESTA:
+                    resultado = "Ya se mandaron suficientes fotos en este mensaje. No mandes mas."
+                else:
+                    resultado = await enviar_foto((bloque.input or {}).get("producto_id", ""))
+                    if resultado.startswith("OK"):
+                        fotos_enviadas += 1
+            else:
+                resultado = "Herramienta no disponible."
+            resultados.append(
+                {"type": "tool_result", "tool_use_id": bloque.id, "content": resultado}
+            )
+        mensajes.append({"role": "user", "content": resultados})
+
+        try:
+            respuesta = await _llamar({} if not _soporta_esfuerzo else extras)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Error llamando a Claude despues de una herramienta: {e}")
+            return obtener_mensaje_error(), False
+
     if getattr(respuesta, "stop_reason", None) == "max_tokens":
         logger.warning(
             f"La respuesta se corto por llegar al tope de {MAX_TOKENS} tokens. "
@@ -158,6 +221,8 @@ async def generar_respuesta(mensaje: str, historial: list[dict]) -> tuple[str, b
         )
 
     texto = _extraer_texto(respuesta)
+    if not texto and fotos_enviadas:
+        texto = "Ahi te van las fotos. ¿Cual te late mas?"
     if not texto:
         logger.warning("Claude devolvio una respuesta sin texto")
         return obtener_mensaje_fallback(), False

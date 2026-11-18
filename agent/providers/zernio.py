@@ -174,6 +174,51 @@ class ProveedorZernio(ProveedorWhatsApp):
         logger.error(f"Zernio rechazo el envio [{r.status_code}]: {detalle}")
         return False
 
+    async def enviar_imagen(
+        self, telefono: str, url: str, texto: str, contexto: dict | None = None
+    ) -> bool:
+        """
+        Manda una imagen con pie de foto dentro de la conversacion.
+        La URL tiene que ser publica y devolver el archivo (JPEG o PNG, maximo 5 MB).
+        """
+        contexto = contexto or {}
+        conversation_id = contexto.get("conversation_id")
+        account_id = contexto.get("account_id") or self.account_id
+
+        if not self.api_key or not conversation_id or not account_id:
+            logger.error("No se puede enviar la imagen: faltan API key, conversation_id o account_id")
+            return False
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        evento_id = contexto.get("evento_id")
+        if evento_id:
+            # Una clave distinta por foto, para que no choque con la del texto ni con otras fotos
+            headers["Idempotency-Key"] = f"agentkit-{evento_id}-{url.rsplit('/', 1)[-1]}"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as cliente:
+                r = await cliente.post(
+                    f"{self.base_url}/inbox/conversations/{conversation_id}/messages",
+                    json={
+                        "accountId": account_id,
+                        "message": texto,
+                        "attachmentUrl": url,
+                        "attachmentType": "image",
+                    },
+                    headers=headers,
+                )
+        except httpx.HTTPError as e:
+            logger.error(f"Error de red mandando imagen a Zernio: {e}")
+            return False
+
+        if r.status_code == 200:
+            return True
+        logger.error(f"Zernio rechazo la imagen [{r.status_code}]: {r.text[:500]}")
+        return False
+
     # ── Diagnostico ──────────────────────────────────────────────────────
 
     async def verificar_conexion(self) -> tuple[bool, str]:

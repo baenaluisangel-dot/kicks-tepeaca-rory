@@ -15,8 +15,10 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
 from agent.brain import generar_respuesta, obtener_mensaje_error
+from agent.catalogo import obtener_producto, pie_de_foto, url_foto
 from agent.memory import (
     guardar_mensaje,
     inicializar_db,
@@ -85,6 +87,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AgentKit — WhatsApp AI Agent", version="2.0.0", lifespan=lifespan)
+
+# Fotos de los productos. WhatsApp las descarga de aqui, asi que tienen que ser publicas.
+app.mount("/fotos", StaticFiles(directory="static/fotos"), name="fotos")
 
 
 @app.get("/")
@@ -178,7 +183,28 @@ async def procesar_mensaje(msg: MensajeEntrante):
             # El historial se lee ANTES de guardar el mensaje actual: brain.py agrega
             # el mensaje nuevo al final, y asi no queda duplicado.
             historial = await obtener_historial(msg.telefono)
-            respuesta, es_respuesta_real = await generar_respuesta(msg.texto, historial)
+
+            fotos_mandadas: list[str] = []
+
+            async def enviar_foto(producto_id: str) -> str:
+                """La usa Claude (herramienta enviar_foto) para mandar la foto de un producto."""
+                producto = obtener_producto(producto_id)
+                if not producto:
+                    return f"ERROR: no existe el producto '{producto_id}'."
+                url = url_foto(producto)
+                if not url:
+                    return "ERROR: no hay URL publica configurada para las fotos."
+                ok = await proveedor.enviar_imagen(
+                    msg.telefono, url, pie_de_foto(producto), msg.contexto
+                )
+                if ok:
+                    fotos_mandadas.append(producto["nombre"])
+                    return f"OK: foto de {producto['nombre']} enviada."
+                return "ERROR: no se pudo enviar la foto. Ofrece que el equipo se la manda."
+
+            respuesta, es_respuesta_real = await generar_respuesta(
+                msg.texto, historial, enviar_foto
+            )
 
             enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto)
 
@@ -196,7 +222,14 @@ async def procesar_mensaje(msg: MensajeEntrante):
             # los deja contaminando el contexto de todos los mensajes que vengan despues.
             if es_respuesta_real:
                 await guardar_mensaje(msg.telefono, "user", msg.texto)
-                await guardar_mensaje(msg.telefono, "assistant", respuesta)
+                # El historial solo guarda texto: anotamos las fotos que se mandaron para
+                # que Rory sepa despues que ya las envio (y cuales).
+                nota = (
+                    f"\n[Nota interna: en este mensaje se enviaron las fotos de: {', '.join(fotos_mandadas)}]"
+                    if fotos_mandadas
+                    else ""
+                )
+                await guardar_mensaje(msg.telefono, "assistant", respuesta + nota)
 
             logger.info(f"Respuesta enviada a {msg.telefono}: {respuesta}")
 
