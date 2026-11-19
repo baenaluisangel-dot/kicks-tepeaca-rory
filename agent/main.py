@@ -238,13 +238,19 @@ async def procesar_mensaje(msg: MensajeEntrante):
                     return "ERROR: no hay URL publica configurada para el catalogo."
                 # Se manda el PDF como archivo (en Instagram tambien). Si Instagram lo
                 # rechaza, se cae al enlace como ultimo recurso.
+                # En Instagram el pie de foto sale como un globo aparte (ruido): sin texto.
+                pie = "Catálogo de juguetes de Kicks Tepeaca 🎁"
                 ok = await proveedor.enviar_documento(
                     msg.telefono,
                     url,
                     ARCHIVO_CATALOGO_PDF,
-                    "Catálogo de juguetes de Kicks Tepeaca 🎁",
+                    "" if es_instagram else pie,
                     msg.contexto,
                 )
+                if not ok and es_instagram:
+                    ok = await proveedor.enviar_documento(
+                        msg.telefono, url, ARCHIVO_CATALOGO_PDF, pie, msg.contexto
+                    )
                 if not ok and es_instagram:
                     ok = await proveedor.enviar_mensaje(
                         msg.telefono,
