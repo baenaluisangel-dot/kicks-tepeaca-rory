@@ -215,7 +215,12 @@ class ProveedorZernio(ProveedorWhatsApp):
             )
         except ValueError:
             pass
-        logger.error(f"Zernio rechazo el envio [{r.status_code}]: {detalle}")
+        logger.error(
+            f"Zernio rechazo el envio [{r.status_code}]: {detalle} "
+            f"(cuenta_zernio={contexto.get('cuenta_zernio')}, "
+            f"plataforma={contexto.get('plataforma')}, account_id={account_id}, "
+            f"key_2_configurada={bool(self.api_key_2)})"
+        )
         return False
 
     async def enviar_imagen(
