@@ -236,19 +236,19 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 url = url_catalogo_pdf()
                 if not url:
                     return "ERROR: no hay URL publica configurada para el catalogo."
-                if es_instagram:
-                    # Instagram no acepta PDFs en los DMs: se manda el enlace.
+                # Se manda el PDF como archivo (en Instagram tambien). Si Instagram lo
+                # rechaza, se cae al enlace como ultimo recurso.
+                ok = await proveedor.enviar_documento(
+                    msg.telefono,
+                    url,
+                    ARCHIVO_CATALOGO_PDF,
+                    "Catálogo de juguetes de Kicks Tepeaca 🎁",
+                    msg.contexto,
+                )
+                if not ok and es_instagram:
                     ok = await proveedor.enviar_mensaje(
                         msg.telefono,
                         f"Catálogo de juguetes de Kicks Tepeaca 🎁\n{url}",
-                        msg.contexto,
-                    )
-                else:
-                    ok = await proveedor.enviar_documento(
-                        msg.telefono,
-                        url,
-                        ARCHIVO_CATALOGO_PDF,
-                        "Catálogo de juguetes de Kicks Tepeaca 🎁",
                         msg.contexto,
                     )
                 if ok:
