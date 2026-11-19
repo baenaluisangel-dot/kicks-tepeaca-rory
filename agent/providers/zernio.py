@@ -105,14 +105,11 @@ class ProveedorZernio(ProveedorWhatsApp):
             # nunca choque con un numero de WhatsApp en el historial.
             telefono = "ig:" + (remitente.get("id") or "")
             if not texto.strip() and mensaje.get("attachments"):
-                # Respuestas a historias, fotos, stickers, etc. llegan sin texto.
-                tipos = {a.get("originalType") or a.get("type") for a in mensaje["attachments"]}
-                if "story_mention" in tipos:
-                    texto = "[El cliente te mencionó en su historia de Instagram]"
-                elif "sticker" in tipos:
-                    texto = "[El cliente mandó un sticker]"
-                else:
-                    texto = "[El cliente mandó una imagen o archivo sin texto]"
+                # Cuando llegan de un anuncio, Instagram manda primero el anuncio/reel
+                # (sin texto) y luego el texto ("Quiero más información"). Contestar a
+                # los dos duplica la respuesta, asi que lo que viene sin texto se ignora.
+                logger.info("Mensaje de Instagram sin texto (adjunto/anuncio): se ignora")
+                return []
         else:
             # phoneNumber viene en E.164 con "+". Desde abril de 2026 puede faltar
             # (los usuarios con username de WhatsApp no exponen su numero), asi que
