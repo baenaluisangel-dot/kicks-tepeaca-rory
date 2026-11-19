@@ -192,6 +192,8 @@ async def procesar_mensaje(msg: MensajeEntrante):
             # el mensaje nuevo al final, y asi no queda duplicado.
             historial = await obtener_historial(msg.telefono)
 
+            plataforma = msg.contexto.get("plataforma", "whatsapp")
+            es_instagram = plataforma == "instagram"
             fotos_mandadas: list[str] = []   # nombres de productos, para la nota del historial
             contador = {"fotos": 0}          # fotos enviadas en esta respuesta
 
@@ -234,20 +236,28 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 url = url_catalogo_pdf()
                 if not url:
                     return "ERROR: no hay URL publica configurada para el catalogo."
-                ok = await proveedor.enviar_documento(
-                    msg.telefono,
-                    url,
-                    ARCHIVO_CATALOGO_PDF,
-                    "Catálogo de juguetes de Kicks Tepeaca 🎁",
-                    msg.contexto,
-                )
+                if es_instagram:
+                    # Instagram no acepta PDFs en los DMs: se manda el enlace.
+                    ok = await proveedor.enviar_mensaje(
+                        msg.telefono,
+                        f"Catálogo de juguetes de Kicks Tepeaca 🎁\n{url}",
+                        msg.contexto,
+                    )
+                else:
+                    ok = await proveedor.enviar_documento(
+                        msg.telefono,
+                        url,
+                        ARCHIVO_CATALOGO_PDF,
+                        "Catálogo de juguetes de Kicks Tepeaca 🎁",
+                        msg.contexto,
+                    )
                 if ok:
                     fotos_mandadas.append("el catálogo de juguetes en PDF")
                     return "OK: catalogo en PDF enviado."
                 return "ERROR: no se pudo enviar el PDF. Ofrece que el equipo se lo manda."
 
             respuesta, es_respuesta_real = await generar_respuesta(
-                msg.texto, historial, enviar_foto, enviar_catalogo
+                msg.texto, historial, enviar_foto, enviar_catalogo, plataforma
             )
 
             enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto)

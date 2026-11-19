@@ -142,7 +142,11 @@ def _es_error_de_esfuerzo(error: Exception) -> bool:
 
 
 async def generar_respuesta(
-    mensaje: str, historial: list[dict], enviar_foto=None, enviar_catalogo=None
+    mensaje: str,
+    historial: list[dict],
+    enviar_foto=None,
+    enviar_catalogo=None,
+    plataforma: str = "whatsapp",
 ) -> tuple[str, bool]:
     """
     Genera una respuesta con Claude.
@@ -170,6 +174,19 @@ async def generar_respuesta(
     mensajes.append({"role": "user", "content": mensaje})
 
     system_prompt = cargar_system_prompt()
+    if plataforma == "instagram":
+        system_prompt += (
+            "\n\n## Canal actual: Instagram (mensajes directos)\n"
+            "- El cliente te escribe por Instagram, no por WhatsApp: no tienes su telefono. "
+            "Si hay que pasarlo con el equipo o apartar, pidele su nombre y un numero de WhatsApp "
+            "o dile que puede escribirnos por WhatsApp al +52 1 223 120 4786 si prefiere.\n"
+            "- El catalogo en PDF se manda como enlace; las fotos llegan como imagen y el nombre y "
+            "precio en un mensaje aparte.\n"
+            "- Mensajes aun mas cortos. Sin markdown.\n"
+            "- Si el mensaje entre corchetes dice que el cliente mando una imagen, sticker o "
+            "historia sin texto, saludalo con gusto y preguntale que juguete le interesa; no "
+            "finjas haber visto la imagen.\n"
+        )
     extras = {"output_config": {"effort": ESFUERZO}} if (_soporta_esfuerzo and ESFUERZO) else {}
 
     async def _llamar(parametros_extra: dict):

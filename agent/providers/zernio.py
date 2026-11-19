@@ -89,30 +89,52 @@ class ProveedorZernio(ProveedorWhatsApp):
             return []
 
         mensaje = payload.get("message") or {}
-        if mensaje.get("platform") != "whatsapp":
+        plataforma = mensaje.get("platform")
+        if plataforma not in ("whatsapp", "instagram"):
+            return []
+
+        # Si otra app controla la conversacion (standby), no contestamos.
+        if (payload.get("metadata") or {}).get("standby"):
             return []
 
         remitente = mensaje.get("sender") or {}
-        # phoneNumber viene en E.164 con "+". Desde abril de 2026 puede faltar
-        # (los usuarios con username de WhatsApp no exponen su numero), asi que
-        # caemos al identificador que Meta si garantiza.
-        telefono = (remitente.get("phoneNumber") or "").lstrip("+")
-        if not telefono:
-            telefono = remitente.get("businessScopedUserId") or remitente.get("id") or ""
+        texto = mensaje.get("text") or ""
+
+        if plataforma == "instagram":
+            # Instagram no tiene telefono: el id del usuario, con prefijo para que
+            # nunca choque con un numero de WhatsApp en el historial.
+            telefono = "ig:" + (remitente.get("id") or "")
+            if not texto.strip() and mensaje.get("attachments"):
+                # Respuestas a historias, fotos, stickers, etc. llegan sin texto.
+                tipos = {a.get("originalType") or a.get("type") for a in mensaje["attachments"]}
+                if "story_mention" in tipos:
+                    texto = "[El cliente te mencionó en su historia de Instagram]"
+                elif "sticker" in tipos:
+                    texto = "[El cliente mandó un sticker]"
+                else:
+                    texto = "[El cliente mandó una imagen o archivo sin texto]"
+        else:
+            # phoneNumber viene en E.164 con "+". Desde abril de 2026 puede faltar
+            # (los usuarios con username de WhatsApp no exponen su numero), asi que
+            # caemos al identificador que Meta si garantiza.
+            telefono = (remitente.get("phoneNumber") or "").lstrip("+")
+            if not telefono:
+                telefono = remitente.get("businessScopedUserId") or remitente.get("id") or ""
 
         cuenta = payload.get("account") or {}
 
         return [
             MensajeEntrante(
                 telefono=telefono,
-                texto=mensaje.get("text") or "",
+                texto=texto,
                 mensaje_id=mensaje.get("platformMessageId") or mensaje.get("id") or "",
                 # Zernio marca la direccion: solo contestamos lo que entra
                 es_propio=mensaje.get("direction") != "incoming",
                 contexto={
                     "evento_id": payload.get("id", ""),
                     "conversation_id": mensaje.get("conversationId", ""),
-                    "account_id": cuenta.get("id", ""),
+                    "account_id": cuenta.get("accountId") or cuenta.get("id", ""),
+                    "plataforma": plataforma,
                 },
             )
         ]
