@@ -8,6 +8,7 @@ Funciona con cualquier proveedor (Zernio, Meta) gracias a la capa de providers.
 
 import asyncio
 import logging
+import time
 import os
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -92,6 +93,8 @@ async def lifespan(app: FastAPI):
     yield
 
 
+_ultimos_textos: dict[tuple[str, str], float] = {}
+
 app = FastAPI(title="AgentKit — WhatsApp AI Agent", version="2.0.0", lifespan=lifespan)
 
 # Fotos de los productos. WhatsApp las descarga de aqui, asi que tienen que ser publicas.
@@ -169,6 +172,19 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
         if evento_id and not await marcar_evento_procesado(evento_id):
             logger.info(f"Evento repetido, se ignora: {evento_id}")
             continue
+
+        # Instagram a veces entrega el mismo mensaje dos veces con ids distintos (sobre
+        # todo el predeterminado de los anuncios). Mismo cliente + mismo texto en menos
+        # de 60 s = duplicado, no se contesta dos veces.
+        ahora = time.monotonic()
+        clave = (msg.telefono, msg.texto.strip().lower())
+        if ahora - _ultimos_textos.get(clave, -1e9) < 60:
+            logger.info(f"Mensaje duplicado de {msg.telefono}, se ignora")
+            continue
+        _ultimos_textos[clave] = ahora
+        if len(_ultimos_textos) > 2000:
+            for k in [k for k, t in _ultimos_textos.items() if ahora - t > 60]:
+                _ultimos_textos.pop(k, None)
 
         logger.info(f"Mensaje de {msg.telefono}: {msg.texto}")
         tareas.add_task(procesar_mensaje, msg)
