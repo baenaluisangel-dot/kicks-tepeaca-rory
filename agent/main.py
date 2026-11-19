@@ -193,7 +193,7 @@ async def procesar_mensaje(msg: MensajeEntrante):
             historial = await obtener_historial(msg.telefono)
 
             plataforma = msg.contexto.get("plataforma", "whatsapp")
-            es_instagram = plataforma == "instagram"
+            es_instagram = plataforma in ("instagram", "facebook")  # canales sin telefono
             fotos_mandadas: list[str] = []   # nombres de productos, para la nota del historial
             contador = {"fotos": 0}          # fotos enviadas en esta respuesta
 

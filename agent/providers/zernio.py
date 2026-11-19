@@ -32,6 +32,10 @@ class ProveedorZernio(ProveedorWhatsApp):
         # Opcional: solo se usa para el chequeo de conexion al arrancar.
         # Para responder, el account_id sale del propio webhook.
         self.account_id = os.getenv("ZERNIO_ACCOUNT_ID", "")
+        # Segunda cuenta de Zernio (opcional), por ejemplo para Facebook Messenger.
+        # Cada cuenta tiene su propia API key y su propio secreto de webhook.
+        self.api_key_2 = os.getenv("ZERNIO_API_KEY_2", "")
+        self.webhook_secret_2 = os.getenv("ZERNIO_WEBHOOK_SECRET_2", "")
         # Ojo con el "or": os.getenv(clave, default) solo usa el default si la clave NO
         # existe. Como el .env trae "ZERNIO_BASE_URL=" vacia, os.getenv devuelve "" y el
         # default nunca se aplicaria. El "or" cubre los dos casos.
@@ -60,23 +64,35 @@ class ProveedorZernio(ProveedorWhatsApp):
             return False
 
         cuerpo = await request.body()
-        firma_esperada = hmac.new(
-            self.webhook_secret.encode("utf-8"), cuerpo, hashlib.sha256
-        ).hexdigest()
+        # Se prueba con el secreto de cada cuenta; el que coincida dice de cual viene.
+        secretos = [(1, self.webhook_secret)]
+        if self.webhook_secret_2:
+            secretos.append((2, self.webhook_secret_2))
 
-        # compare_digest sobre str exige ASCII puro. Los headers HTTP pueden traer bytes
-        # que Starlette decodifica como latin-1, y ahi tiraria TypeError: eso escaparia del
-        # handler como un 500, y el proveedor reintentaria el evento siete veces.
-        try:
-            iguales = hmac.compare_digest(firma_esperada, firma_recibida)
-        except TypeError:
-            logger.warning("La firma del webhook trae caracteres invalidos: rechazado")
-            return False
+        for cuenta, secreto in secretos:
+            if not secreto:
+                continue
+            firma_esperada = hmac.new(
+                secreto.encode("utf-8"), cuerpo, hashlib.sha256
+            ).hexdigest()
+            # compare_digest sobre str exige ASCII puro; los headers pueden traer otros
+            # bytes y eso tiraria TypeError (un 500 y siete reintentos del proveedor).
+            try:
+                if hmac.compare_digest(firma_esperada, firma_recibida):
+                    request.state.zernio_cuenta = cuenta
+                    return True
+            except TypeError:
+                logger.warning("La firma del webhook trae caracteres invalidos: rechazado")
+                return False
 
-        if not iguales:
-            logger.warning("Firma de webhook invalida: rechazado")
-            return False
-        return True
+        logger.warning("Firma de webhook invalida: rechazado")
+        return False
+
+    def _api_key(self, contexto: dict | None) -> str:
+        """API key de la cuenta de Zernio de la que vino el mensaje."""
+        if (contexto or {}).get("cuenta_zernio") == 2 and self.api_key_2:
+            return self.api_key_2
+        return self.api_key
 
     async def parsear_webhook(self, request: Request) -> list[MensajeEntrante]:
         """Normaliza el evento message.received de Zernio."""
@@ -90,7 +106,9 @@ class ProveedorZernio(ProveedorWhatsApp):
 
         mensaje = payload.get("message") or {}
         plataforma = mensaje.get("platform")
-        if plataforma not in ("whatsapp", "instagram"):
+        if plataforma == "messenger":
+            plataforma = "facebook"
+        if plataforma not in ("whatsapp", "instagram", "facebook"):
             return []
 
         # Si otra app controla la conversacion (standby), no contestamos.
@@ -109,6 +127,11 @@ class ProveedorZernio(ProveedorWhatsApp):
                 # (sin texto) y luego el texto ("Quiero más información"). Contestar a
                 # los dos duplica la respuesta, asi que lo que viene sin texto se ignora.
                 logger.info("Mensaje de Instagram sin texto (adjunto/anuncio): se ignora")
+                return []
+        elif plataforma == "facebook":
+            telefono = "fb:" + (remitente.get("id") or "")
+            if not texto.strip():
+                logger.info("Mensaje de Facebook sin texto (adjunto): se ignora")
                 return []
         else:
             # phoneNumber viene en E.164 con "+". Desde abril de 2026 puede faltar
@@ -132,6 +155,7 @@ class ProveedorZernio(ProveedorWhatsApp):
                     "conversation_id": mensaje.get("conversationId", ""),
                     "account_id": cuenta.get("accountId") or cuenta.get("id", ""),
                     "plataforma": plataforma,
+                    "cuenta_zernio": getattr(request.state, "zernio_cuenta", 1),
                 },
             )
         ]
@@ -146,7 +170,8 @@ class ProveedorZernio(ProveedorWhatsApp):
         conversation_id = contexto.get("conversation_id")
         account_id = contexto.get("account_id") or self.account_id
 
-        if not self.api_key:
+        api_key = self._api_key(contexto)
+        if not api_key:
             logger.error("No se puede enviar: falta ZERNIO_API_KEY")
             return False
         if not conversation_id or not account_id:
@@ -157,7 +182,7 @@ class ProveedorZernio(ProveedorWhatsApp):
 
         url = f"{self.base_url}/inbox/conversations/{conversation_id}/messages"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         # Si el webhook se reintenta, esta clave evita que Zernio mande la respuesta dos veces
@@ -204,12 +229,13 @@ class ProveedorZernio(ProveedorWhatsApp):
         conversation_id = contexto.get("conversation_id")
         account_id = contexto.get("account_id") or self.account_id
 
-        if not self.api_key or not conversation_id or not account_id:
+        api_key = self._api_key(contexto)
+        if not api_key or not conversation_id or not account_id:
             logger.error("No se puede enviar la imagen: faltan API key, conversation_id o account_id")
             return False
 
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         evento_id = contexto.get("evento_id")
@@ -250,12 +276,13 @@ class ProveedorZernio(ProveedorWhatsApp):
         conversation_id = contexto.get("conversation_id")
         account_id = contexto.get("account_id") or self.account_id
 
-        if not self.api_key or not conversation_id or not account_id:
+        api_key = self._api_key(contexto)
+        if not api_key or not conversation_id or not account_id:
             logger.error("No se puede enviar el documento: faltan API key, conversation_id o account_id")
             return False
 
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         evento_id = contexto.get("evento_id")

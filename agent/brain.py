@@ -174,7 +174,7 @@ async def generar_respuesta(
     mensajes.append({"role": "user", "content": mensaje})
 
     system_prompt = cargar_system_prompt()
-    if plataforma == "instagram":
+    if plataforma in ("instagram", "facebook"):
         system_prompt += (
             "\n\n## Canal actual: Instagram (mensajes directos)\n"
             "- El cliente te escribe por Instagram, no por WhatsApp: no tienes su telefono. "
