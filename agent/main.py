@@ -21,6 +21,8 @@ from fastapi.staticfiles import StaticFiles
 from agent.brain import MAX_FOTOS_POR_RESPUESTA, generar_respuesta, obtener_mensaje_error
 from agent.catalogo import (
     ARCHIVO_CATALOGO_PDF,
+    ARCHIVO_PAQUETES_PDF,
+    url_paquetes_pdf,
     obtener_producto,
     pie_de_foto,
     url_catalogo_pdf,
@@ -28,6 +30,8 @@ from agent.catalogo import (
 )
 from agent.memory import (
     guardar_mensaje,
+    guardar_modo,
+    obtener_modo,
     inicializar_db,
     liberar_evento,
     limpiar_eventos_viejos,
@@ -193,6 +197,12 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
     return {"status": "ok", "encolados": encolados}
 
 
+def _es_campana_puebla(msg: MensajeEntrante) -> bool:
+    """True si el mensaje viene de un anuncio de Puebla (por el anuncio o por el texto)."""
+    pistas = f"{msg.texto} {msg.contexto.get('referral', '')}".lower()
+    return "puebla" in pistas or "paquetes de toy story" in pistas
+
+
 async def procesar_mensaje(msg: MensajeEntrante):
     """
     Genera la respuesta y la manda de vuelta. Corre fuera del ciclo del webhook.
@@ -207,6 +217,16 @@ async def procesar_mensaje(msg: MensajeEntrante):
             # El historial se lee ANTES de guardar el mensaje actual: brain.py agrega
             # el mensaje nuevo al final, y asi no queda duplicado.
             historial = await obtener_historial(msg.telefono)
+
+            # Campana de origen: "puebla" si el mensaje o el anuncio lo dicen; se guarda para
+            # que el resto de la conversacion siga en ese modo (los mensajes siguientes ya
+            # no traen el dato del anuncio).
+            modo = await obtener_modo(msg.telefono)
+            if modo != "puebla" and _es_campana_puebla(msg):
+                modo = "puebla"
+                await guardar_modo(msg.telefono, modo)
+                logger.info(f"{msg.telefono}: conversacion marcada como campana Puebla")
+            es_puebla = modo == "puebla"
 
             plataforma = msg.contexto.get("plataforma", "whatsapp")
             es_instagram = plataforma in ("instagram", "facebook")  # canales sin telefono
@@ -249,37 +269,43 @@ async def procesar_mensaje(msg: MensajeEntrante):
 
             async def enviar_catalogo() -> str:
                 """La usa Claude (herramienta enviar_catalogo) para mandar el PDF del catalogo."""
-                url = url_catalogo_pdf()
+                url = url_paquetes_pdf() if es_puebla else url_catalogo_pdf()
+                archivo = ARCHIVO_PAQUETES_PDF if es_puebla else ARCHIVO_CATALOGO_PDF
                 if not url:
                     return "ERROR: no hay URL publica configurada para el catalogo."
                 # Se manda el PDF como archivo (en Instagram tambien). Si Instagram lo
                 # rechaza, se cae al enlace como ultimo recurso.
                 # En Instagram el pie de foto sale como un globo aparte (ruido): sin texto.
-                pie = "Catálogo de juguetes de Kicks Tepeaca 🎁"
+                pie = "Catálogo de paquetes Toy Story 🎁" if es_puebla else "Catálogo de juguetes de Kicks Tepeaca 🎁"
                 ok = await proveedor.enviar_documento(
                     msg.telefono,
                     url,
-                    ARCHIVO_CATALOGO_PDF,
+                    archivo,
                     "" if es_instagram else pie,
                     msg.contexto,
                 )
                 if not ok and es_instagram:
                     ok = await proveedor.enviar_documento(
-                        msg.telefono, url, ARCHIVO_CATALOGO_PDF, pie, msg.contexto
+                        msg.telefono, url, archivo, pie, msg.contexto
                     )
                 if not ok and es_instagram:
                     ok = await proveedor.enviar_mensaje(
                         msg.telefono,
-                        f"Catálogo de juguetes de Kicks Tepeaca 🎁\n{url}",
+                        f"{pie}\n{url}",
                         msg.contexto,
                     )
                 if ok:
-                    fotos_mandadas.append("el catálogo de juguetes en PDF")
+                    fotos_mandadas.append("el catálogo de paquetes en PDF" if es_puebla else "el catálogo de juguetes en PDF")
                     return "OK: catalogo en PDF enviado."
                 return "ERROR: no se pudo enviar el PDF. Ofrece que el equipo se lo manda."
 
             respuesta, es_respuesta_real = await generar_respuesta(
-                msg.texto, historial, enviar_foto, enviar_catalogo, plataforma
+                msg.texto,
+                historial,
+                None if es_puebla else enviar_foto,
+                enviar_catalogo,
+                plataforma,
+                modo,
             )
 
             enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto)

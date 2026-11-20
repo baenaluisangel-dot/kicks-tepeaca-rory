@@ -78,6 +78,35 @@ class EventoProcesado(Base):
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
 
 
+class ConversacionModo(Base):
+    """Campana de la que viene cada conversacion ("puebla"). Sin fila = Tepeaca."""
+
+    __tablename__ = "conversacion_modo"
+
+    telefono: Mapped[str] = mapped_column(String(50), primary_key=True)
+    modo: Mapped[str] = mapped_column(String(20))
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
+
+
+async def obtener_modo(telefono: str) -> str:
+    """Modo guardado de la conversacion; "tepeaca" si no hay ninguno."""
+    async with async_session() as session:
+        fila = await session.get(ConversacionModo, telefono)
+    return fila.modo if fila else "tepeaca"
+
+
+async def guardar_modo(telefono: str, modo: str):
+    """Guarda (o actualiza) el modo de la conversacion."""
+    async with async_session() as session:
+        fila = await session.get(ConversacionModo, telefono)
+        if fila:
+            fila.modo = modo
+            fila.actualizado_en = ahora()
+        else:
+            session.add(ConversacionModo(telefono=telefono, modo=modo, actualizado_en=ahora()))
+        await session.commit()
+
+
 async def inicializar_db():
     """Crea las tablas si no existen."""
     async with engine.begin() as conn:

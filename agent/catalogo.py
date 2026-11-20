@@ -70,3 +70,14 @@ def url_catalogo_pdf() -> str | None:
     if not base:
         return None
     return f"{base}/catalogo/{ARCHIVO_CATALOGO_PDF}"
+
+
+ARCHIVO_PAQUETES_PDF = "Catalogo_Paquetes_ToyStory_Kicks.pdf"
+
+
+def url_paquetes_pdf() -> str | None:
+    """URL publica del PDF de paquetes de la campana de Puebla."""
+    base = url_base()
+    if not base:
+        return None
+    return f"{base}/catalogo/{ARCHIVO_PAQUETES_PDF}"

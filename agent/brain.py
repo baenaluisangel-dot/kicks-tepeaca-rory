@@ -147,6 +147,7 @@ async def generar_respuesta(
     enviar_foto=None,
     enviar_catalogo=None,
     plataforma: str = "whatsapp",
+    modo: str = "tepeaca",
 ) -> tuple[str, bool]:
     """
     Genera una respuesta con Claude.
@@ -174,6 +175,8 @@ async def generar_respuesta(
     mensajes.append({"role": "user", "content": mensaje})
 
     system_prompt = cargar_system_prompt()
+    if modo == "puebla":
+        system_prompt += "\n" + cargar_config_prompts().get("puebla_prompt", "")
     if plataforma in ("instagram", "facebook"):
         system_prompt += (
             "\n\n## Canal actual: Instagram (mensajes directos)\n"

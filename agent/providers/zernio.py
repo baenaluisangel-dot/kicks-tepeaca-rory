@@ -118,6 +118,21 @@ class ProveedorZernio(ProveedorWhatsApp):
         remitente = mensaje.get("sender") or {}
         texto = mensaje.get("text") or ""
 
+        # Datos del anuncio de origen, si Zernio los manda (para distinguir campanas).
+        # Diagnostico: se loguean solo los NOMBRES de los campos, no su contenido.
+        referral = (
+            mensaje.get("referral")
+            or mensaje.get("adReferral")
+            or (payload.get("metadata") or {}).get("referral")
+            or ""
+        )
+        if plataforma in ("instagram", "facebook"):
+            logger.info(
+                f"Campos del mensaje: {sorted(mensaje.keys())} | "
+                f"metadata: {sorted((payload.get('metadata') or {}).keys())} | "
+                f"referral: {'si' if referral else 'no'}"
+            )
+
         if plataforma == "instagram":
             # Instagram no tiene telefono: el id del usuario, con prefijo para que
             # nunca choque con un numero de WhatsApp en el historial.
@@ -155,6 +170,7 @@ class ProveedorZernio(ProveedorWhatsApp):
                     "conversation_id": mensaje.get("conversationId", ""),
                     "account_id": cuenta.get("accountId") or cuenta.get("id", ""),
                     "plataforma": plataforma,
+                    "referral": str(referral)[:500],
                     "cuenta_zernio": getattr(request.state, "zernio_cuenta", 1),
                 },
             )
