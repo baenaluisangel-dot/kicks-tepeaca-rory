@@ -83,6 +83,25 @@ HERRAMIENTA_CATALOGO = {
 }
 
 
+HERRAMIENTA_EQUIPO = {
+    "name": "avisar_equipo",
+    "description": (
+        "Marca esta conversacion para que una persona del equipo la atienda y pausa a Rory "
+        "en ella. Usala cuando el cliente ya eligio que quiere comprar o apartar, pide hablar "
+        "con una persona, hay una queja o un problema, quiere colaborar o algo que no puedes "
+        "resolver. Despues de usarla, avisale al cliente en una frase que un companero del "
+        "equipo le contesta por este chat."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "motivo": {"type": "string", "description": "Resumen corto: que quiere el cliente."}
+        },
+        "required": ["motivo"],
+    },
+}
+
+
 def cargar_config_prompts() -> dict:
     """Lee toda la configuracion desde config/prompts.yaml."""
     try:
@@ -148,6 +167,7 @@ async def generar_respuesta(
     enviar_catalogo=None,
     plataforma: str = "whatsapp",
     modo: str = "tepeaca",
+    avisar_equipo=None,
 ) -> tuple[str, bool]:
     """
     Genera una respuesta con Claude.
@@ -191,6 +211,13 @@ async def generar_respuesta(
             "- No repitas una pregunta que ya hiciste en el historial; si ya saludaste y "
             "preguntaste por modelo o catalogo, avanza con lo que el cliente pide.\n"
         )
+    if avisar_equipo:
+        system_prompt += (
+            "\n\n## Pasar con una persona\n"
+            "Usa la herramienta avisar_equipo cuando el cliente ya decidio comprar o apartar y "
+            "dio sus datos, pide hablar con una persona, tiene una queja, quiere colaborar o "
+            "preguntas algo que no sabes. Es mejor avisar que inventar.\n"
+        )
     extras = {"output_config": {"effort": ESFUERZO}} if (_soporta_esfuerzo and ESFUERZO) else {}
 
     async def _llamar(parametros_extra: dict):
@@ -199,6 +226,8 @@ async def generar_respuesta(
             herramientas.append(HERRAMIENTA_FOTO)
         if enviar_catalogo:
             herramientas.append(HERRAMIENTA_CATALOGO)
+        if avisar_equipo:
+            herramientas.append(HERRAMIENTA_EQUIPO)
         if herramientas:
             parametros_extra = {**parametros_extra, "tools": herramientas}
         return await client.messages.create(
@@ -249,6 +278,8 @@ async def generar_respuesta(
                 resultado = await enviar_catalogo()
                 if resultado.startswith("OK"):
                     fotos_enviadas += 1
+            elif bloque.name == "avisar_equipo" and avisar_equipo:
+                resultado = await avisar_equipo((bloque.input or {}).get("motivo", ""))
             else:
                 resultado = "Herramienta no disponible."
             resultados.append(

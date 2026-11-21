@@ -149,6 +149,64 @@ async def reanudar(telefono: str):
             await session.commit()
 
 
+class Atencion(Base):
+    """Estado de cada conversacion para el panel del equipo."""
+
+    __tablename__ = "atencion"
+
+    telefono: Mapped[str] = mapped_column(String(50), primary_key=True)
+    plataforma: Mapped[str] = mapped_column(String(20), default="whatsapp")
+    ultimo_texto: Mapped[str] = mapped_column(Text, default="")
+    ultimo_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
+    necesita_persona: Mapped[bool] = mapped_column(default=False)
+    motivo: Mapped[str] = mapped_column(Text, default="")
+
+
+async def registrar_mensaje_cliente(telefono: str, plataforma: str, texto: str):
+    async with async_session() as session:
+        fila = await session.get(Atencion, telefono)
+        if not fila:
+            fila = Atencion(telefono=telefono)
+            session.add(fila)
+        fila.plataforma = plataforma
+        fila.ultimo_texto = texto[:500]
+        fila.ultimo_en = ahora()
+        await session.commit()
+
+
+async def marcar_necesita_persona(telefono: str, necesita: bool, motivo: str = ""):
+    async with async_session() as session:
+        fila = await session.get(Atencion, telefono)
+        if not fila:
+            fila = Atencion(telefono=telefono)
+            session.add(fila)
+        fila.necesita_persona = necesita
+        fila.motivo = motivo[:300] if necesita else ""
+        await session.commit()
+
+
+async def listar_atencion(limite: int = 200) -> list[dict]:
+    """Conversaciones para el panel: primero las que necesitan persona, luego las recientes."""
+    async with async_session() as session:
+        filas = (await session.execute(select(Atencion))).scalars().all()
+        pausas = {p.telefono: p for p in (await session.execute(select(ConversacionPausa))).scalars().all()}
+    salida = []
+    for f in filas:
+        p = pausas.get(f.telefono)
+        pausada = False
+        if p:
+            h = p.hasta
+            pausada = h is None or (h if h.tzinfo else h.replace(tzinfo=timezone.utc)) > ahora()
+        salida.append({
+            "telefono": f.telefono, "plataforma": f.plataforma, "texto": f.ultimo_texto,
+            "ultimo_en": f.ultimo_en, "necesita_persona": f.necesita_persona,
+            "motivo": f.motivo, "pausada": pausada,
+        })
+    salida.sort(key=lambda x: x["ultimo_en"], reverse=True)
+    salida.sort(key=lambda x: not x["necesita_persona"])
+    return salida[:limite]
+
+
 async def inicializar_db():
     """Crea las tablas si no existen."""
     async with engine.begin() as conn:

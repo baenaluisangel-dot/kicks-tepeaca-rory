@@ -8,6 +8,8 @@ Funciona con cualquier proveedor (Zernio, Meta) gracias a la capa de providers.
 
 import asyncio
 import logging
+import html
+import random
 import re
 import time
 import os
@@ -16,7 +18,7 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent.brain import MAX_FOTOS_POR_RESPUESTA, generar_respuesta, obtener_mensaje_error
@@ -32,6 +34,9 @@ from agent.catalogo import (
 from agent.memory import (
     guardar_mensaje,
     esta_pausada,
+    listar_atencion,
+    marcar_necesita_persona,
+    registrar_mensaje_cliente,
     guardar_modo,
     obtener_modo,
     pausar,
@@ -197,12 +202,15 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
             for k in [k for k, t in _ultimos_textos.items() if ahora - t > 60]:
                 _ultimos_textos.pop(k, None)
 
+        await registrar_mensaje_cliente(
+            msg.telefono, msg.contexto.get("plataforma", "whatsapp"), msg.texto
+        )
         if await esta_pausada(msg.telefono):
             logger.info(f"Mensaje de {msg.telefono} sin contestar: Rory esta en pausa ahi")
             continue
 
         logger.info(f"Mensaje de {msg.telefono}: {msg.texto}")
-        tareas.add_task(procesar_mensaje, msg)
+        _encolar(msg)
         encolados += 1
 
     return {"status": "ok", "encolados": encolados}
@@ -218,6 +226,7 @@ _RE_REANUDAR = re.compile(
     r"rory.{0,25}(act[ií]v|reanud|contin|vuelve|retoma|prende)|\b(bot|rory)\s*on\b", re.I
 )
 HORAS_PAUSA_HUMANO = 12
+HORAS_PAUSA_AVISO = 24
 
 
 async def _atender_mensaje_del_equipo(msg: MensajeEntrante):
@@ -230,8 +239,51 @@ async def _atender_mensaje_del_equipo(msg: MensajeEntrante):
         await pausar(msg.telefono)
         logger.info(f"{msg.telefono}: Rory pausado por el equipo (hasta que lo reactiven)")
     elif msg.contexto.get("humano"):
+        await marcar_necesita_persona(msg.telefono, False)
         await pausar(msg.telefono, HORAS_PAUSA_HUMANO)
         logger.info(f"{msg.telefono}: respondio una persona; Rory en pausa {HORAS_PAUSA_HUMANO} h")
+
+
+# Rory no contesta al instante: espera unos minutos (aleatorio) para que no se sienta
+# automatico, junta los mensajes que lleguen mientras tanto y, si en ese tiempo una persona
+# del equipo entra a la conversacion, no contesta.
+DELAY_MIN = float(os.getenv("RESPUESTA_DELAY_MIN") or "120")
+DELAY_MAX = float(os.getenv("RESPUESTA_DELAY_MAX") or "240")
+_pendientes: dict[str, list[MensajeEntrante]] = {}
+_trabajadores: dict[str, asyncio.Task] = {}
+
+
+def _encolar(msg: MensajeEntrante):
+    _pendientes.setdefault(msg.telefono, []).append(msg)
+    if msg.telefono not in _trabajadores:
+        _trabajadores[msg.telefono] = asyncio.create_task(_trabajador(msg.telefono))
+
+
+async def _trabajador(telefono: str):
+    try:
+        while _pendientes.get(telefono):
+            await asyncio.sleep(random.uniform(DELAY_MIN, max(DELAY_MIN, DELAY_MAX)))
+            lote = _pendientes.pop(telefono, [])
+            if not lote:
+                break
+            if await esta_pausada(telefono):
+                logger.info(f"{telefono}: una persona tomo la conversacion; Rory no contesta")
+                continue
+            ultimo = lote[-1]
+            unido = MensajeEntrante(
+                telefono=telefono,
+                texto="\n".join(m.texto.strip() for m in lote),
+                mensaje_id=ultimo.mensaje_id,
+                es_propio=False,
+                contexto=ultimo.contexto,
+            )
+            await procesar_mensaje(unido)
+    except Exception as e:  # noqa: BLE001
+        logger.exception(f"Error en el trabajador de {telefono}: {e}")
+    finally:
+        _trabajadores.pop(telefono, None)
+        if _pendientes.get(telefono):  # llegaron mensajes justo al terminar
+            _trabajadores[telefono] = asyncio.create_task(_trabajador(telefono))
 
 
 def _es_campana_puebla(msg: MensajeEntrante) -> bool:
@@ -351,6 +403,13 @@ async def procesar_mensaje(msg: MensajeEntrante):
                         "turno; no uses enviar_catalogo.]"
                     )
 
+            async def avisar_equipo(motivo: str) -> str:
+                """La usa Claude: deja la conversacion marcada para una persona y pausa a Rory."""
+                await marcar_necesita_persona(msg.telefono, True, motivo)
+                await pausar(msg.telefono, HORAS_PAUSA_AVISO)
+                logger.info(f"{msg.telefono}: necesita persona — {motivo}")
+                return "OK: el equipo quedo avisado. Dile al cliente que un companero le contesta por este chat."
+
             respuesta, es_respuesta_real = await generar_respuesta(
                 texto_para_ia,
                 historial,
@@ -358,6 +417,7 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 enviar_catalogo,
                 plataforma,
                 modo,
+                avisar_equipo,
             )
 
             enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto)
@@ -394,3 +454,81 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 await proveedor.enviar_mensaje(msg.telefono, obtener_mensaje_error(), msg.contexto)
             except Exception:  # noqa: BLE001
                 logger.error("Tampoco se pudo avisarle al cliente del error")
+
+
+# ── Panel del equipo ─────────────────────────────────────────────────────
+
+PANEL_TOKEN = os.getenv("PANEL_TOKEN", "")
+
+
+def _panel_autorizado(token: str) -> bool:
+    import hmac
+    return bool(PANEL_TOKEN) and hmac.compare_digest(token or "", PANEL_TOKEN)
+
+
+@app.get("/panel", response_class=HTMLResponse)
+async def panel(token: str = ""):
+    """Lista de conversaciones: cuales necesitan una persona y cuales tiene Rory."""
+    if not _panel_autorizado(token):
+        raise HTTPException(status_code=404)
+    t = html.escape(token, quote=True)
+    filas = []
+    for c in await listar_atencion():
+        if c["necesita_persona"]:
+            estado = "🔴 Necesita persona"
+        elif c["pausada"]:
+            estado = "⏸️ Rory en pausa"
+        else:
+            estado = "🤖 Rory atiende"
+        tel = c["telefono"]
+        if c["plataforma"] == "whatsapp":
+            enlace = f'<a href="https://wa.me/{html.escape(tel)}" target="_blank">+{html.escape(tel)}</a>'
+        else:
+            enlace = f'{html.escape(c["plataforma"].capitalize())} ({html.escape(tel.split(":")[-1][-6:])})'
+        hora = c["ultimo_en"].astimezone().strftime("%d/%m %H:%M")
+
+        def boton(accion, texto):
+            return (
+                f'<form method="post" action="/panel/accion" style="display:inline">'
+                f'<input type="hidden" name="token" value="{t}">'
+                f'<input type="hidden" name="telefono" value="{html.escape(tel, quote=True)}">'
+                f'<input type="hidden" name="accion" value="{accion}"><button>{texto}</button></form> '
+            )
+
+        botones = boton("reactivar", "Reactivar Rory") + boton("pausar", "Yo me encargo")
+        if c["necesita_persona"]:
+            botones += boton("atendido", "Ya lo atendí")
+        motivo = f'<br><small>{html.escape(c["motivo"])}</small>' if c["motivo"] else ""
+        clase = "alerta" if c["necesita_persona"] else ""
+        filas.append(
+            f'<tr class="{clase}"><td>{estado}{motivo}</td><td>{enlace}</td>'
+            f'<td>{html.escape(c["texto"])}</td><td>{hora}</td><td>{botones}</td></tr>'
+        )
+    cuerpo = "".join(filas) or '<tr><td colspan="5">Sin conversaciones todavía.</td></tr>'
+    return HTMLResponse(
+        "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+        "<title>Rory — conversaciones</title>"
+        "<style>body{font-family:system-ui;margin:16px}table{border-collapse:collapse;width:100%}"
+        "td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left;vertical-align:top}"
+        "tr.alerta{background:#ffe8e8}button{padding:4px 8px;margin:2px 0}</style>"
+        "<h2>Conversaciones de Rory</h2><p><a href='?token=" + t + "'>Actualizar</a></p>"
+        "<table><tr><th>Estado</th><th>Cliente</th><th>Último mensaje</th><th>Hora</th><th></th></tr>"
+        + cuerpo + "</table>"
+    )
+
+
+@app.post("/panel/accion")
+async def panel_accion(request: Request):
+    form = await request.form()
+    if not _panel_autorizado(str(form.get("token", ""))):
+        raise HTTPException(status_code=404)
+    tel, accion = str(form.get("telefono", "")), str(form.get("accion", ""))
+    if accion == "reactivar":
+        await reanudar(tel)
+        await marcar_necesita_persona(tel, False)
+    elif accion == "pausar":
+        await pausar(tel)
+    elif accion == "atendido":
+        await marcar_necesita_persona(tel, False)
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(f"/panel?token={form.get('token')}", status_code=303)
