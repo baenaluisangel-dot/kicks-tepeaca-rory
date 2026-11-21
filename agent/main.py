@@ -215,7 +215,7 @@ _RE_PAUSA = re.compile(
     re.I,
 )
 _RE_REANUDAR = re.compile(
-    r"rory.{0,25}(activ|reanud|contin|vuelve|retoma|prende)|\b(bot|rory)\s*on\b", re.I
+    r"rory.{0,25}(act[ií]v|reanud|contin|vuelve|retoma|prende)|\b(bot|rory)\s*on\b", re.I
 )
 HORAS_PAUSA_HUMANO = 12
 
