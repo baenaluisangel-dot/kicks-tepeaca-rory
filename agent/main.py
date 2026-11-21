@@ -336,6 +336,13 @@ async def procesar_mensaje(msg: MensajeEntrante):
             # En Puebla el PDF de paquetes se manda SIEMPRE en el primer turno, sin depender
             # de que el modelo decida usar la herramienta.
             texto_para_ia = msg.texto
+            # Un numero con historial de Tepeaca (apartado, juguetes sueltos) contaminaria las
+            # respuestas: en Puebla solo se usa el historial desde que se mando el PDF de paquetes.
+            if es_puebla:
+                inicio = next(
+                    (i for i, m in enumerate(historial) if "paquetes en PDF" in m["content"]), None
+                )
+                historial = [] if inicio is None else historial[max(inicio - 1, 0):]
             ya_mando_pdf = any("paquetes en PDF" in m["content"] for m in historial)
             if es_puebla and not ya_mando_pdf:
                 if (await enviar_catalogo()).startswith("OK"):
