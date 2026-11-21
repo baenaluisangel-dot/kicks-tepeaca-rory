@@ -103,7 +103,7 @@ class ProveedorZernio(ProveedorWhatsApp):
             return self._parsear_enviado(payload, request)
         if evento != "message.received":
             # message.sent, message.delivered, message.read, etc. no se contestan
-            logger.debug(f"Evento ignorado: {evento}")
+            logger.info(f"Evento ignorado: {evento}")
             return []
 
         mensaje = payload.get("message") or {}
@@ -231,6 +231,55 @@ class ProveedorZernio(ProveedorWhatsApp):
                 },
             )
         ]
+
+    async def hubo_respuesta_humana(self, contexto: dict, desde) -> bool:
+        """
+        True si una persona del equipo escribio en la conversacion despues de `desde`
+        (datetime UTC). Respaldo por si el webhook message.sent no llega: se consulta la
+        API. Si no se puede saber, devuelve False (Rory contesta como siempre).
+        """
+        conversation_id = contexto.get("conversation_id")
+        api_key = self._api_key(contexto)
+        if not conversation_id or not api_key:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as cliente:
+                r = await cliente.get(
+                    f"{self.base_url}/inbox/conversations/{conversation_id}/messages",
+                    params={"sortOrder": "desc", "limit": 15},
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+            if r.status_code != 200:
+                logger.warning(f"No se pudo revisar la conversacion ({r.status_code})")
+                return False
+            datos = r.json()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"No se pudo revisar la conversacion: {type(e).__name__}")
+            return False
+
+        lista = datos if isinstance(datos, list) else (
+            datos.get("messages") or datos.get("data") or []
+        )
+        if lista and not getattr(self, "_log_campos_lista", False):
+            self._log_campos_lista = True
+            logger.info(f"Campos de un mensaje de la lista de Zernio: {sorted(lista[0].keys())}")
+        for m in lista:
+            if not isinstance(m, dict) or m.get("direction") != "outgoing":
+                continue
+            humano = m.get("sentVia") == "human" or m.get("source") == "whatsapp_business_app"
+            if not humano:
+                continue
+            marca = m.get("sentAt") or m.get("createdAt") or m.get("timestamp") or ""
+            try:
+                from datetime import datetime, timezone
+                t = datetime.fromisoformat(str(marca).replace("Z", "+00:00"))
+                if t.tzinfo is None:
+                    t = t.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            if t >= desde:
+                return True
+        return False
 
     # ── Enviar ───────────────────────────────────────────────────────────
 

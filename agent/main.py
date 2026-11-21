@@ -265,7 +265,12 @@ _pendientes: dict[str, list[MensajeEntrante]] = {}
 _trabajadores: dict[str, asyncio.Task] = {}
 
 
+_primer_pendiente: dict[str, "datetime"] = {}
+
+
 def _encolar(msg: MensajeEntrante):
+    from datetime import datetime, timezone
+    _primer_pendiente.setdefault(msg.telefono, datetime.now(timezone.utc))
     _pendientes.setdefault(msg.telefono, []).append(msg)
     if msg.telefono not in _trabajadores:
         _trabajadores[msg.telefono] = asyncio.create_task(_trabajador(msg.telefono))
@@ -276,12 +281,20 @@ async def _trabajador(telefono: str):
         while _pendientes.get(telefono):
             await asyncio.sleep(random.uniform(DELAY_MIN, max(DELAY_MIN, DELAY_MAX)))
             lote = _pendientes.pop(telefono, [])
+            desde = _primer_pendiente.pop(telefono, None)
             if not lote:
                 break
             if await esta_pausada(telefono):
                 logger.info(f"{telefono}: una persona tomo la conversacion; Rory no contesta")
                 continue
             ultimo = lote[-1]
+            # Respaldo: si una persona ya contesto en este chat, Rory se hace a un lado.
+            consulta = getattr(proveedor, "hubo_respuesta_humana", None)
+            if consulta and desde and await consulta(ultimo.contexto, desde):
+                logger.info(f"{telefono}: una persona ya contesto; Rory se pausa y no contesta")
+                await pausar(telefono, HORAS_PAUSA_HUMANO)
+                await marcar_necesita_persona(telefono, False)
+                continue
             unido = MensajeEntrante(
                 telefono=telefono,
                 texto="\n".join(m.texto.strip() for m in lote),
