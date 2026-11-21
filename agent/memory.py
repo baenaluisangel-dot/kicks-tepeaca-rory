@@ -107,6 +107,48 @@ async def guardar_modo(telefono: str, modo: str):
         await session.commit()
 
 
+class ConversacionPausa(Base):
+    """Conversaciones donde Rory no contesta. hasta=None -> pausa indefinida."""
+
+    __tablename__ = "conversacion_pausa"
+
+    telefono: Mapped[str] = mapped_column(String(50), primary_key=True)
+    hasta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+async def esta_pausada(telefono: str) -> bool:
+    async with async_session() as session:
+        fila = await session.get(ConversacionPausa, telefono)
+    if not fila:
+        return False
+    if fila.hasta is None:
+        return True
+    hasta = fila.hasta if fila.hasta.tzinfo else fila.hasta.replace(tzinfo=timezone.utc)
+    return hasta > ahora()
+
+
+async def pausar(telefono: str, horas: float | None = None):
+    """Pausa a Rory en la conversacion (horas=None: hasta que se reactive)."""
+    hasta = ahora() + timedelta(hours=horas) if horas else None
+    async with async_session() as session:
+        fila = await session.get(ConversacionPausa, telefono)
+        if fila:
+            # una pausa indefinida no se acorta con una temporal
+            if not (fila.hasta is None and hasta is not None):
+                fila.hasta = hasta
+        else:
+            session.add(ConversacionPausa(telefono=telefono, hasta=hasta))
+        await session.commit()
+
+
+async def reanudar(telefono: str):
+    async with async_session() as session:
+        fila = await session.get(ConversacionPausa, telefono)
+        if fila:
+            await session.delete(fila)
+            await session.commit()
+
+
 async def inicializar_db():
     """Crea las tablas si no existen."""
     async with engine.begin() as conn:

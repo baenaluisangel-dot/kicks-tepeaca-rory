@@ -99,6 +99,8 @@ class ProveedorZernio(ProveedorWhatsApp):
         payload = await request.json()
 
         evento = payload.get("event")
+        if evento == "message.sent":
+            return self._parsear_enviado(payload, request)
         if evento != "message.received":
             # message.sent, message.delivered, message.read, etc. no se contestan
             logger.debug(f"Evento ignorado: {evento}")
@@ -172,6 +174,60 @@ class ProveedorZernio(ProveedorWhatsApp):
                     "plataforma": plataforma,
                     "referral": str(referral)[:500],
                     "cuenta_zernio": getattr(request.state, "zernio_cuenta", 1),
+                },
+            )
+        ]
+
+    def _parsear_enviado(self, payload: dict, request: Request) -> list[MensajeEntrante]:
+        """
+        message.sent: un mensaje que sale de la cuenta del negocio. Sirve para que el
+        equipo pueda pausar a Rory escribiendo en el chat. No se contesta nunca.
+        """
+        mensaje = payload.get("message") or {}
+        plataforma = mensaje.get("platform")
+        if plataforma == "messenger":
+            plataforma = "facebook"
+        if plataforma not in ("whatsapp", "instagram", "facebook"):
+            return []
+        # Lo que manda Rory por la API no cuenta como intervencion humana
+        if mensaje.get("sentVia") == "api" or mensaje.get("source") == "cloud_api":
+            return []
+        # El destinatario viene en la conversacion, no en sender (sender es el negocio)
+        conv = payload.get("conversation") or {}
+        contacto = (
+            conv.get("participantId") or conv.get("contactId")
+            or (conv.get("participant") or {}).get("id")
+            or (conv.get("contact") or {}).get("id") or ""
+        )
+        telefono_wa = (
+            (conv.get("participant") or {}).get("phoneNumber")
+            or (conv.get("contact") or {}).get("phoneNumber")
+            or conv.get("participantPhone") or ""
+        )
+        if plataforma == "instagram":
+            telefono = "ig:" + contacto
+        elif plataforma == "facebook":
+            telefono = "fb:" + contacto
+        else:
+            telefono = str(telefono_wa).lstrip("+") or contacto
+        logger.info(
+            f"message.sent ({plataforma}) campos conversation: {sorted(conv.keys())} | "
+            f"sentVia={mensaje.get('sentVia')} source={mensaje.get('source')} "
+            f"destino_resuelto={'si' if telefono.strip(':') and telefono not in ('ig:', 'fb:') else 'no'}"
+        )
+        if telefono in ("", "ig:", "fb:"):
+            return []
+        humano = mensaje.get("sentVia") == "human" or mensaje.get("source") == "whatsapp_business_app"
+        return [
+            MensajeEntrante(
+                telefono=telefono,
+                texto=mensaje.get("text") or "",
+                mensaje_id=mensaje.get("platformMessageId") or mensaje.get("id") or "",
+                es_propio=True,
+                contexto={
+                    "evento_id": payload.get("id", ""),
+                    "plataforma": plataforma,
+                    "humano": humano,
                 },
             )
         ]

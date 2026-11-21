@@ -8,6 +8,7 @@ Funciona con cualquier proveedor (Zernio, Meta) gracias a la capa de providers.
 
 import asyncio
 import logging
+import re
 import time
 import os
 from collections import defaultdict
@@ -30,8 +31,11 @@ from agent.catalogo import (
 )
 from agent.memory import (
     guardar_mensaje,
+    esta_pausada,
     guardar_modo,
     obtener_modo,
+    pausar,
+    reanudar,
     inicializar_db,
     liberar_evento,
     limpiar_eventos_viejos,
@@ -168,7 +172,10 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
 
     encolados = 0
     for msg in mensajes:
-        if msg.es_propio or not msg.texto.strip():
+        if msg.es_propio:
+            await _atender_mensaje_del_equipo(msg)
+            continue
+        if not msg.texto.strip():
             continue
 
         # La entrega es "al menos una vez": el mismo evento puede llegar dos veces
@@ -190,11 +197,41 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
             for k in [k for k, t in _ultimos_textos.items() if ahora - t > 60]:
                 _ultimos_textos.pop(k, None)
 
+        if await esta_pausada(msg.telefono):
+            logger.info(f"Mensaje de {msg.telefono} sin contestar: Rory esta en pausa ahi")
+            continue
+
         logger.info(f"Mensaje de {msg.telefono}: {msg.texto}")
         tareas.add_task(procesar_mensaje, msg)
         encolados += 1
 
     return {"status": "ok", "encolados": encolados}
+
+
+_RE_PAUSA = re.compile(
+    r"rory.{0,25}(deja|dejes|pausa|pausar|detente|para|alto|apag|stop|no (contest|respond|opere))"
+    r"|(deja|dejes|detente|apaga).{0,12}(de operar|de contestar|de responder).{0,25}(rory|bot)"
+    r"|\b(bot|rory)\s*(off|stop)\b|yo me encargo|nosotros nos encargamos",
+    re.I,
+)
+_RE_REANUDAR = re.compile(
+    r"rory.{0,25}(activ|reanud|contin|vuelve|retoma|prende)|\b(bot|rory)\s*on\b", re.I
+)
+HORAS_PAUSA_HUMANO = 12
+
+
+async def _atender_mensaje_del_equipo(msg: MensajeEntrante):
+    """El equipo escribio en el chat: comando de pausa/reanudar, o pausa automatica."""
+    texto = msg.texto.strip()
+    if _RE_REANUDAR.search(texto):
+        await reanudar(msg.telefono)
+        logger.info(f"{msg.telefono}: Rory reactivado por el equipo")
+    elif texto and _RE_PAUSA.search(texto):
+        await pausar(msg.telefono)
+        logger.info(f"{msg.telefono}: Rory pausado por el equipo (hasta que lo reactiven)")
+    elif msg.contexto.get("humano"):
+        await pausar(msg.telefono, HORAS_PAUSA_HUMANO)
+        logger.info(f"{msg.telefono}: respondio una persona; Rory en pausa {HORAS_PAUSA_HUMANO} h")
 
 
 def _es_campana_puebla(msg: MensajeEntrante) -> bool:
