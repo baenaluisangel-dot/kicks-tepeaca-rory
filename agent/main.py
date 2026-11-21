@@ -333,8 +333,19 @@ async def procesar_mensaje(msg: MensajeEntrante):
                     return "OK: catalogo en PDF enviado."
                 return "ERROR: no se pudo enviar el PDF. Ofrece que el equipo se lo manda."
 
+            # En Puebla el PDF de paquetes se manda SIEMPRE en el primer turno, sin depender
+            # de que el modelo decida usar la herramienta.
+            texto_para_ia = msg.texto
+            ya_mando_pdf = any("paquetes en PDF" in m["content"] for m in historial)
+            if es_puebla and not ya_mando_pdf:
+                if (await enviar_catalogo()).startswith("OK"):
+                    texto_para_ia += (
+                        "\n\n[Nota interna: el sistema ya le envió el PDF de paquetes en este "
+                        "turno; no uses enviar_catalogo.]"
+                    )
+
             respuesta, es_respuesta_real = await generar_respuesta(
-                msg.texto,
+                texto_para_ia,
                 historial,
                 None if es_puebla else enviar_foto,
                 enviar_catalogo,
