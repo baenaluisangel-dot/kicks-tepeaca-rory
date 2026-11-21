@@ -406,9 +406,9 @@ async def procesar_mensaje(msg: MensajeEntrante):
                     url = url_foto(ruta)
                     if not url:
                         return "ERROR: no hay URL publica configurada para las fotos."
-                    # En Puebla no se muestra el precio suelto: solo se vende por paquete
-                    pie = producto["nombre"] if es_puebla else pie_de_foto(producto, n, total)
-                    ok = await proveedor.enviar_imagen(msg.telefono, url, pie, msg.contexto)
+                    ok = await proveedor.enviar_imagen(
+                        msg.telefono, url, pie_de_foto(producto, n, total), msg.contexto
+                    )
                     if not ok:
                         break
                     enviadas += 1
