@@ -213,6 +213,57 @@ async def listar_atencion(limite: int = 200) -> list[dict]:
     return salida[:limite]
 
 
+class Pendiente(Base):
+    """Mensajes de clientes que Rory todavia no contesta (esperan su retraso).
+    Se guardan para que un redespliegue o reinicio no los pierda."""
+
+    __tablename__ = "pendientes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telefono: Mapped[str] = mapped_column(String(50), index=True)
+    texto: Mapped[str] = mapped_column(Text)
+    mensaje_id: Mapped[str] = mapped_column(String(200), default="")
+    contexto: Mapped[str] = mapped_column(Text, default="{}")
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
+
+
+async def guardar_pendiente(telefono: str, texto: str, mensaje_id: str, contexto: dict) -> int:
+    import json
+    async with async_session() as session:
+        fila = Pendiente(
+            telefono=telefono, texto=texto, mensaje_id=mensaje_id or "",
+            contexto=json.dumps(contexto, ensure_ascii=False), creado_en=ahora(),
+        )
+        session.add(fila)
+        await session.commit()
+        return fila.id
+
+
+async def borrar_pendientes(ids: list[int]):
+    if not ids:
+        return
+    async with async_session() as session:
+        await session.execute(delete(Pendiente).where(Pendiente.id.in_(ids)))
+        await session.commit()
+
+
+async def cargar_pendientes() -> list[dict]:
+    import json
+    async with async_session() as session:
+        filas = (await session.execute(select(Pendiente).order_by(Pendiente.id))).scalars().all()
+    salida = []
+    for f in filas:
+        try:
+            ctx = json.loads(f.contexto or "{}")
+        except ValueError:
+            ctx = {}
+        salida.append({
+            "id": f.id, "telefono": f.telefono, "texto": f.texto,
+            "mensaje_id": f.mensaje_id, "contexto": ctx, "creado_en": f.creado_en,
+        })
+    return salida
+
+
 async def inicializar_db():
     """Crea las tablas si no existen."""
     async with engine.begin() as conn:

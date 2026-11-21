@@ -34,7 +34,10 @@ from agent.catalogo import (
 )
 from agent.memory import (
     guardar_mensaje,
+    borrar_pendientes,
+    cargar_pendientes,
     esta_pausada,
+    guardar_pendiente,
     listar_atencion,
     marcar_necesita_persona,
     necesita_persona,
@@ -95,6 +98,7 @@ async def lifespan(app: FastAPI):
     await inicializar_db()
     await limpiar_eventos_viejos()
     logger.info("Base de datos lista")
+    await recuperar_pendientes()
     logger.info(f"Servidor AgentKit escuchando en el puerto {PORT}")
 
     global estado_proveedor
@@ -223,7 +227,7 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
             continue
 
         logger.info(f"Mensaje de {msg.telefono}: {msg.texto}")
-        _encolar(msg)
+        await _encolar(msg)
         encolados += 1
 
     return {"status": "ok", "encolados": encolados}
@@ -269,24 +273,57 @@ _trabajadores: dict[str, asyncio.Task] = {}
 _primer_pendiente: dict[str, "datetime"] = {}
 
 
-def _encolar(msg: MensajeEntrante):
+_espera_recuperado: dict[str, tuple[float, float]] = {}
+
+
+async def _encolar(msg: MensajeEntrante):
     from datetime import datetime, timezone
+    # Se guarda en la base: si el servidor se reinicia (deploy) el mensaje no se pierde.
+    try:
+        msg.contexto["_pend_id"] = await guardar_pendiente(
+            msg.telefono, msg.texto, msg.mensaje_id, msg.contexto
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"No se pudo guardar el mensaje pendiente: {e}")
     _primer_pendiente.setdefault(msg.telefono, datetime.now(timezone.utc))
     _pendientes.setdefault(msg.telefono, []).append(msg)
     if msg.telefono not in _trabajadores:
         _trabajadores[msg.telefono] = asyncio.create_task(_trabajador(msg.telefono))
 
 
+async def recuperar_pendientes():
+    """Al arrancar: retoma los mensajes que quedaron esperando cuando se reinicio el servidor."""
+    filas = await cargar_pendientes()
+    for f in filas:
+        ctx = dict(f["contexto"])
+        ctx["_pend_id"] = f["id"]
+        msg = MensajeEntrante(
+            telefono=f["telefono"], texto=f["texto"], mensaje_id=f["mensaje_id"],
+            es_propio=False, contexto=ctx,
+        )
+        _primer_pendiente.setdefault(f["telefono"], f["creado_en"])
+        _pendientes.setdefault(f["telefono"], []).append(msg)
+        _espera_recuperado[f["telefono"]] = (10.0, 40.0)  # ya esperaron: contestar pronto
+    for tel in list(_pendientes):
+        if tel not in _trabajadores:
+            _trabajadores[tel] = asyncio.create_task(_trabajador(tel))
+    if filas:
+        logger.info(f"Se recuperaron {len(filas)} mensajes pendientes tras el reinicio")
+
+
 async def _trabajador(telefono: str):
     try:
         while _pendientes.get(telefono):
-            await asyncio.sleep(random.uniform(DELAY_MIN, max(DELAY_MIN, DELAY_MAX)))
+            lo, hi = _espera_recuperado.pop(telefono, (DELAY_MIN, max(DELAY_MIN, DELAY_MAX)))
+            await asyncio.sleep(random.uniform(lo, hi))
             lote = _pendientes.pop(telefono, [])
             desde = _primer_pendiente.pop(telefono, None)
+            ids_lote = [m.contexto.get("_pend_id") for m in lote if m.contexto.get("_pend_id")]
             if not lote:
                 break
             if await esta_pausada(telefono):
                 logger.info(f"{telefono}: una persona tomo la conversacion; Rory no contesta")
+                await borrar_pendientes(ids_lote)
                 continue
             ultimo = lote[-1]
             # Respaldo: si una persona ya contesto en este chat, Rory se hace a un lado.
@@ -295,6 +332,7 @@ async def _trabajador(telefono: str):
                 logger.info(f"{telefono}: una persona ya contesto; Rory se pausa y no contesta")
                 await pausar(telefono, HORAS_PAUSA_HUMANO)
                 await marcar_necesita_persona(telefono, False)
+                await borrar_pendientes(ids_lote)
                 continue
             unido = MensajeEntrante(
                 telefono=telefono,
@@ -304,6 +342,7 @@ async def _trabajador(telefono: str):
                 contexto=ultimo.contexto,
             )
             await procesar_mensaje(unido)
+            await borrar_pendientes(ids_lote)
     except Exception as e:  # noqa: BLE001
         logger.exception(f"Error en el trabajador de {telefono}: {e}")
     finally:
