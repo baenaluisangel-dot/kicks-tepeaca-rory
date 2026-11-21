@@ -36,6 +36,7 @@ from agent.memory import (
     esta_pausada,
     listar_atencion,
     marcar_necesita_persona,
+    necesita_persona,
     registrar_mensaje_cliente,
     guardar_modo,
     obtener_modo,
@@ -47,6 +48,7 @@ from agent.memory import (
     marcar_evento_procesado,
     obtener_historial,
 )
+from agent.notificar import avisar_por_telegram, enlace_cliente
 from agent.providers import obtener_proveedor
 from agent.providers.base import MensajeEntrante
 
@@ -107,6 +109,7 @@ async def lifespan(app: FastAPI):
 
 
 _ultimos_textos: dict[tuple[str, str], float] = {}
+_ultimo_recordatorio: dict[str, float] = {}
 
 app = FastAPI(title="AgentKit — WhatsApp AI Agent", version="2.0.0", lifespan=lifespan)
 
@@ -207,6 +210,15 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
         )
         if await esta_pausada(msg.telefono):
             logger.info(f"Mensaje de {msg.telefono} sin contestar: Rory esta en pausa ahi")
+            # El cliente sigue escribiendo y esta esperando a una persona: recordatorio
+            # (maximo uno cada 10 minutos por cliente).
+            if await necesita_persona(msg.telefono) and ahora - _ultimo_recordatorio.get(msg.telefono, -1e9) > 600:
+                _ultimo_recordatorio[msg.telefono] = ahora
+                plat = msg.contexto.get("plataforma", "whatsapp")
+                await avisar_por_telegram(
+                    f"💬 Un cliente que espera a una persona volvió a escribir.\n"
+                    f"Cliente: {enlace_cliente(msg.telefono, plat)}\nMensaje: {msg.texto[:300]}"
+                )
             continue
 
         logger.info(f"Mensaje de {msg.telefono}: {msg.texto}")
@@ -408,6 +420,11 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 await marcar_necesita_persona(msg.telefono, True, motivo)
                 await pausar(msg.telefono, HORAS_PAUSA_AVISO)
                 logger.info(f"{msg.telefono}: necesita persona — {motivo}")
+                await avisar_por_telegram(
+                    f"🔴 Rory necesita apoyo con un cliente.\n"
+                    f"Cliente: {enlace_cliente(msg.telefono, plataforma)}\n"
+                    f"Motivo: {motivo}\nÚltimo mensaje: {msg.texto[:300]}"
+                )
                 return "OK: el equipo quedo avisado. Dile al cliente que un companero le contesta por este chat."
 
             respuesta, es_respuesta_real = await generar_respuesta(

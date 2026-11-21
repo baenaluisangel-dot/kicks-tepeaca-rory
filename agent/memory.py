@@ -185,6 +185,12 @@ async def marcar_necesita_persona(telefono: str, necesita: bool, motivo: str = "
         await session.commit()
 
 
+async def necesita_persona(telefono: str) -> bool:
+    async with async_session() as session:
+        fila = await session.get(Atencion, telefono)
+    return bool(fila and fila.necesita_persona)
+
+
 async def listar_atencion(limite: int = 200) -> list[dict]:
     """Conversaciones para el panel: primero las que necesitan persona, luego las recientes."""
     async with async_session() as session:
