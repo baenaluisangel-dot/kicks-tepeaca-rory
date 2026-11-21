@@ -258,14 +258,11 @@ async def procesar_mensaje(msg: MensajeEntrante):
             # Campana de origen: "puebla" si el mensaje o el anuncio lo dicen; se guarda para
             # que el resto de la conversacion siga en ese modo (los mensajes siguientes ya
             # no traen el dato del anuncio).
-            modo = await obtener_modo(msg.telefono)
-            if modo != "puebla" and _es_campana_puebla(msg):
-                modo = "puebla"
-                await guardar_modo(msg.telefono, modo)
-                logger.info(f"{msg.telefono}: conversacion marcada como campana Puebla")
-            es_puebla = modo == "puebla"
-
+            # El canal decide la campana: WhatsApp = Puebla (paquetes, pago contra entrega);
+            # Instagram y Facebook = Tepeaca (juguetes, apartado).
             plataforma = msg.contexto.get("plataforma", "whatsapp")
+            modo = "puebla" if plataforma == "whatsapp" else "tepeaca"
+            es_puebla = modo == "puebla"
             es_instagram = plataforma in ("instagram", "facebook")  # canales sin telefono
             fotos_mandadas: list[str] = []   # nombres de productos, para la nota del historial
             contador = {"fotos": 0}          # fotos enviadas en esta respuesta
