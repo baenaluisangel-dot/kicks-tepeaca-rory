@@ -25,6 +25,7 @@ from agent.brain import MAX_FOTOS_POR_RESPUESTA, generar_respuesta, obtener_mens
 from agent.catalogo import (
     ARCHIVO_CATALOGO_PDF,
     ARCHIVO_PAQUETES_PDF,
+    PAQUETES_PUEBLA,
     url_paquetes_pdf,
     obtener_producto,
     pie_de_foto,
@@ -349,6 +350,8 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 producto = obtener_producto(producto_id)
                 if not producto:
                     return f"ERROR: no existe el producto '{producto_id}'."
+                if es_puebla and not producto_id.startswith("toy-story"):
+                    return "ERROR: en Puebla solo se muestran productos de Toy Story."
                 rutas = producto.get("fotos") or []
                 if not rutas:
                     return "ERROR: ese producto no tiene fotos. Ofrece que el equipo se las manda."
@@ -364,9 +367,9 @@ async def procesar_mensaje(msg: MensajeEntrante):
                     url = url_foto(ruta)
                     if not url:
                         return "ERROR: no hay URL publica configurada para las fotos."
-                    ok = await proveedor.enviar_imagen(
-                        msg.telefono, url, pie_de_foto(producto, n, total), msg.contexto
-                    )
+                    # En Puebla no se muestra el precio suelto: solo se vende por paquete
+                    pie = producto["nombre"] if es_puebla else pie_de_foto(producto, n, total)
+                    ok = await proveedor.enviar_imagen(msg.telefono, url, pie, msg.contexto)
                     if not ok:
                         break
                     enviadas += 1
@@ -377,6 +380,25 @@ async def procesar_mensaje(msg: MensajeEntrante):
                     )
                     return f"OK: {enviadas} foto(s) de {producto['nombre']} enviada(s)."
                 return "ERROR: no se pudo enviar la foto. Ofrece que el equipo se la manda."
+
+            async def enviar_fotos_paquete(paquete: str) -> str:
+                """La usa Claude en Puebla: una foto de cada juguete que trae el paquete."""
+                ids = PAQUETES_PUEBLA.get(paquete)
+                if not ids:
+                    return f"ERROR: no existe el paquete '{paquete}'."
+                enviadas = 0
+                for pid in ids:
+                    producto = obtener_producto(pid)
+                    rutas = (producto or {}).get("fotos") or []
+                    url = url_foto(rutas[0]) if rutas else None
+                    if not url:
+                        continue
+                    if await proveedor.enviar_imagen(msg.telefono, url, producto["nombre"], msg.contexto):
+                        enviadas += 1
+                if enviadas:
+                    fotos_mandadas.append(f"fotos del paquete {paquete}")
+                    return f"OK: {enviadas} foto(s) del paquete {paquete} enviada(s)."
+                return "ERROR: no se pudieron enviar las fotos. Ofrece que el equipo se las manda."
 
             async def enviar_catalogo() -> str:
                 """La usa Claude (herramienta enviar_catalogo) para mandar el PDF del catalogo."""
@@ -443,11 +465,12 @@ async def procesar_mensaje(msg: MensajeEntrante):
             respuesta, es_respuesta_real = await generar_respuesta(
                 texto_para_ia,
                 historial,
-                None if es_puebla else enviar_foto,
+                enviar_foto,
                 enviar_catalogo,
                 plataforma,
                 modo,
                 avisar_equipo,
+                enviar_fotos_paquete if es_puebla else None,
             )
 
             enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto)

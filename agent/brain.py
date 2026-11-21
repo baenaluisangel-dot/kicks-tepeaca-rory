@@ -13,7 +13,7 @@ import yaml
 from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 
-from agent.catalogo import ids_validos
+from agent.catalogo import PAQUETES_PUEBLA, ids_validos
 
 load_dotenv()
 logger = logging.getLogger("agentkit")
@@ -82,6 +82,22 @@ HERRAMIENTA_CATALOGO = {
     "input_schema": {"type": "object", "properties": {}},
 }
 
+
+HERRAMIENTA_FOTOS_PAQUETE = {
+    "name": "enviar_fotos_paquete",
+    "description": (
+        "Solo campana de Puebla. Envia al cliente por WhatsApp una foto de cada juguete que "
+        "incluye un paquete de Toy Story (sin precios). Usala cuando pregunten por un paquete "
+        "o pidan ver fotos de lo que incluye. Mandalas una sola vez por paquete."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "paquete": {"type": "string", "enum": list(PAQUETES_PUEBLA.keys())},
+        },
+        "required": ["paquete"],
+    },
+}
 
 HERRAMIENTA_EQUIPO = {
     "name": "avisar_equipo",
@@ -168,6 +184,7 @@ async def generar_respuesta(
     plataforma: str = "whatsapp",
     modo: str = "tepeaca",
     avisar_equipo=None,
+    enviar_fotos_paquete=None,
 ) -> tuple[str, bool]:
     """
     Genera una respuesta con Claude.
@@ -226,6 +243,8 @@ async def generar_respuesta(
             herramientas.append(HERRAMIENTA_FOTO)
         if enviar_catalogo:
             herramientas.append(HERRAMIENTA_CATALOGO)
+        if enviar_fotos_paquete:
+            herramientas.append(HERRAMIENTA_FOTOS_PAQUETE)
         if avisar_equipo:
             herramientas.append(HERRAMIENTA_EQUIPO)
         if herramientas:
@@ -276,6 +295,10 @@ async def generar_respuesta(
                     fotos_enviadas += 1
             elif bloque.name == "enviar_catalogo" and enviar_catalogo:
                 resultado = await enviar_catalogo()
+                if resultado.startswith("OK"):
+                    fotos_enviadas += 1
+            elif bloque.name == "enviar_fotos_paquete" and enviar_fotos_paquete:
+                resultado = await enviar_fotos_paquete((bloque.input or {}).get("paquete", ""))
                 if resultado.startswith("OK"):
                     fotos_enviadas += 1
             elif bloque.name == "avisar_equipo" and avisar_equipo:

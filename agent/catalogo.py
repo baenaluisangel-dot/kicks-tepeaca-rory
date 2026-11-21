@@ -81,3 +81,31 @@ def url_paquetes_pdf() -> str | None:
     if not base:
         return None
     return f"{base}/catalogo/{ARCHIVO_PAQUETES_PDF}"
+
+
+# Paquetes de la campana de Puebla: de que juguetes (ids del catalogo) se compone cada uno.
+PAQUETES_PUEBLA: dict[str, list[str]] = {
+    "Dúo Espacial": ["toy-story-duo-buzz-alien"],
+    "Clásico + Alien": ["toy-story-duo-woody-y-buzz", "toy-story-alien-17-cm"],
+    "Jessie + Tiro al Blanco": ["toy-story-jessie-con-sonido", "toy-story-tiro-al-blanco-peluche"],
+    "Clásico + Rex": ["toy-story-duo-woody-y-buzz", "toy-story-rex-que-habla"],
+    "Vaqueros + Rex": [
+        "toy-story-woody-de-tela-que-habla", "toy-story-jessie-con-sonido", "toy-story-rex-que-habla",
+    ],
+    "Aventura sobre ruedas": [
+        "toy-story-woody-de-tela-que-habla", "toy-story-buzz-con-alas",
+        "toy-story-carro-control-remoto-chico",
+    ],
+    "Los Héroes": [
+        "toy-story-woody-de-tela-que-habla", "toy-story-jessie-con-sonido", "toy-story-buzz-con-alas",
+    ],
+    "Aventura sobre ruedas XL": [
+        "toy-story-woody-de-tela-que-habla", "toy-story-buzz-con-alas",
+        "toy-story-carro-control-remoto-grande",
+    ],
+    "Colección Completa": [
+        "toy-story-woody-de-tela-que-habla", "toy-story-jessie-con-sonido",
+        "toy-story-buzz-con-alas", "toy-story-rex-que-habla", "toy-story-alien-17-cm",
+        "toy-story-tiro-al-blanco-peluche",
+    ],
+}

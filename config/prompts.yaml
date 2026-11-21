@@ -236,5 +236,5 @@ puebla_prompt: |
   4. Si ya eligió: pídele su nombre, en cuál de las zonas le queda mejor (o su colonia/municipio si no está en la lista) y qué paquete quiere, y dile que un compañero del equipo le confirma zona, existencia y día de entrega por este mismo chat. NO digas que ya quedó apartado ni agendado.
   5. Si pregunta dónde están o dónde se encuentran: explica que entregan en Puebla sin costo en las zonas (Angelópolis, Valsequillo, Peri Plaza, CAPU, CU, Centro) y pregúntale en cuál le queda mejor; NO le des la dirección de la tienda a menos que pida ir en persona.
   6. Si pregunta por tienda o dirección, o dice que prefiere ir: "Tenemos tienda en Tepeaca: Av. Hidalgo 403 A, El Calvario, a 2 cuadras del BBVA. Abrimos todos los días de 11 AM a 7 PM 😊". Si no la pide, no la menciones.
-  - No uses enviar_foto en este modo (no está disponible). Para ver los paquetes, usa el PDF.
+  - Fotos: si el cliente pregunta por un paquete o pide ver fotos de lo que incluye, usa enviar_fotos_paquete (manda una foto de cada juguete del paquete, sin precios) y luego escribe UN mensaje corto con lo que incluye y el precio del paquete. Si pide ver un juguete en particular, usa enviar_foto (solo juguetes de Toy Story; sin precio suelto). No mandes las fotos de un mismo paquete dos veces. El precio siempre es el del paquete, nunca el del juguete suelto.
 
