@@ -69,6 +69,7 @@ from agent.memory import (
     obtener_historial,
 )
 from agent.notificar import avisar_por_telegram, enlace_cliente
+from agent.panel import bucle_resumen_diario, fecha_bonita, fecha_hoy_iso, router as panel_router
 from agent.providers import obtener_proveedor
 from agent.providers.base import MensajeEntrante
 
@@ -115,7 +116,7 @@ async def lifespan(app: FastAPI):
     await limpiar_eventos_viejos()
     logger.info("Base de datos lista")
     await recuperar_pendientes()
-    asyncio.create_task(_bucle_resumen_diario())
+    asyncio.create_task(bucle_resumen_diario())
     logger.info(f"Servidor AgentKit escuchando en el puerto {PORT}")
 
     global estado_proveedor
@@ -134,6 +135,7 @@ _ultimos_textos: dict[tuple[str, str], float] = {}
 _ultimo_recordatorio: dict[str, float] = {}
 
 app = FastAPI(title="AgentKit — WhatsApp AI Agent", version="2.0.0", lifespan=lifespan)
+app.include_router(panel_router)
 
 # Fotos de los productos. WhatsApp las descarga de aqui, asi que tienen que ser publicas.
 app.mount("/fotos", StaticFiles(directory="static/fotos"), name="fotos")
@@ -533,12 +535,12 @@ async def procesar_mensaje(msg: MensajeEntrante):
 
             async def ver_dias_entrega(zona: str) -> str:
                 """La usa Claude: dias de entrega abiertos para la zona del cliente."""
-                dias = await dias_disponibles(zona, _fecha_hoy_iso())
+                dias = await dias_disponibles(zona, fecha_hoy_iso())
                 if not dias:
                     return ("No hay dias de entrega abiertos para esa zona por ahora. Usa avisar_equipo "
                             "con tipo 'pedido' y dile al cliente que el equipo le confirma el dia.")
                 lineas = [
-                    f"- {d['fecha']} ({_fecha_bonita(d['fecha'])}), horario {d['horario'] or 'por confirmar'}, "
+                    f"- {d['fecha']} ({fecha_bonita(d['fecha'])}), horario {d['horario'] or 'por confirmar'}, "
                     f"quedan {d['quedan']} lugares"
                     for d in dias[:5]
                 ]
@@ -546,7 +548,7 @@ async def procesar_mensaje(msg: MensajeEntrante):
 
             async def agendar_entrega(fecha: str, zona: str, nombre: str, pedido: str) -> str:
                 """La usa Claude: agenda la entrega (por confirmar) y avisa al equipo."""
-                ok, detalle = await crear_entrega(msg.telefono, fecha, zona, nombre, pedido, _fecha_hoy_iso())
+                ok, detalle = await crear_entrega(msg.telefono, fecha, zona, nombre, pedido, fecha_hoy_iso())
                 if not ok:
                     return f"ERROR: {detalle} Vuelve a llamar ver_dias_entrega y ofrece otro dia."
                 await marcar_necesita_persona(msg.telefono, True, f"Entrega {fecha} {zona}: {pedido}")
@@ -554,10 +556,10 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 logger.info(f"{msg.telefono}: entrega agendada {fecha} {zona}")
                 await avisar_por_telegram(
                     f"🟢 ENTREGA AGENDADA (por confirmar existencia)\n"
-                    f"{_fecha_bonita(fecha)} · {zona} · {detalle or ''}\n"
+                    f"{fecha_bonita(fecha)} · {zona} · {detalle or ''}\n"
                     f"Cliente: {nombre} — {enlace_cliente(msg.telefono, plataforma)}\nPedido: {pedido}"
                 )
-                return (f"OK: agendada para {_fecha_bonita(fecha)} en {zona}"
+                return (f"OK: agendada para {fecha_bonita(fecha)} en {zona}"
                         f"{', horario ' + detalle if detalle else ''}. Dile al cliente que quedo agendada "
                         "y que un companero le confirma la existencia por este chat.")
 
@@ -609,479 +611,3 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 await proveedor.enviar_mensaje(msg.telefono, obtener_mensaje_error(), msg.contexto)
             except Exception:  # noqa: BLE001
                 logger.error("Tampoco se pudo avisarle al cliente del error")
-
-
-# ── Panel del equipo ─────────────────────────────────────────────────────
-
-PANEL_TOKEN = os.getenv("PANEL_TOKEN", "")
-
-
-def _panel_autorizado(token: str) -> bool:
-    import hmac
-    return bool(PANEL_TOKEN) and hmac.compare_digest(token or "", PANEL_TOKEN)
-
-
-def _zona_mx():
-    """Hora de Mexico (Puebla): UTC-6 fijo, sin horario de verano desde 2022."""
-    from datetime import timedelta, timezone
-    return timezone(timedelta(hours=-6))
-
-
-def _inicio_de_hoy():
-    from datetime import datetime
-    z = _zona_mx()
-    return datetime.now(z).replace(hour=0, minute=0, second=0, microsecond=0)
-
-
-DIAS_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
-            "septiembre", "octubre", "noviembre", "diciembre"]
-
-
-def _fecha_hoy_iso() -> str:
-    return _inicio_de_hoy().strftime("%Y-%m-%d")
-
-
-def _fecha_bonita(iso: str) -> str:
-    from datetime import date
-    d = date.fromisoformat(iso)
-    return f"{DIAS_ES[d.weekday()]} {d.day} de {MESES_ES[d.month - 1]}"
-
-
-NOMBRES_TIPO = {
-    "pedido": "🟢 Pedido listo", "duda_producto": "🟠 Duda de producto",
-    "fuera_de_catalogo": "🟡 Pide algo que no tenemos", "queja_o_problema": "🔴 Queja o problema",
-    "otro": "🔵 Otro",
-}
-
-
-async def _resumen_texto() -> str:
-    """Resumen del dia (hora de Mexico) para Telegram y para el panel."""
-    desde = _inicio_de_hoy()
-    m = await metricas(desde)
-    lineas = [f"📊 Resumen de hoy ({desde.strftime('%d/%m')})"]
-    for canal, c in m["por_canal"].items():
-        pct = round(100 * c["respondieron"] / c["nuevas"]) if c["nuevas"] else 0
-        lineas.append(f"{canal.capitalize()}: {c['nuevas']} conversaciones nuevas, {c['respondieron']} respondieron ({pct}%)")
-    if not m["por_canal"]:
-        lineas.append("Sin conversaciones nuevas.")
-    if m["avisos_por_tipo"]:
-        lineas.append("Pasadas al equipo: " + ", ".join(f"{NOMBRES_TIPO.get(t, t)} {n}" for t, n in m["avisos_por_tipo"].items()))
-    esperando = [c for c in await listar_atencion() if c["necesita_persona"]]
-    lineas.append(f"Esperando a una persona ahora: {len(esperando)}")
-    for c in esperando[:10]:
-        lineas.append(f"• {enlace_cliente(c['telefono'], c['plataforma'])} — {c['motivo'][:90]}")
-    from datetime import timedelta
-    manana = (_inicio_de_hoy() + timedelta(days=1)).strftime("%Y-%m-%d")
-    ent = [e for e in await listar_entregas(manana) if e["fecha"] == manana]
-    if ent:
-        lineas.append(f"🚚 Entregas de mañana ({_fecha_bonita(manana)}): {len(ent)}")
-        for e in ent[:15]:
-            lineas.append(f"• {e['nombre']} — {e['zona']} — {e['pedido'][:70]} ({'confirmada' if e['estado'] == 'confirmada' else 'por confirmar'})")
-    return "\n".join(lineas)
-
-
-async def _bucle_resumen_diario():
-    """Manda el resumen por Telegram todos los dias a HORA_RESUMEN (hora de Mexico)."""
-    from datetime import datetime, timedelta
-    hora = int(os.getenv("HORA_RESUMEN") or "21")
-    while True:
-        z = _zona_mx()
-        ahora_mx = datetime.now(z)
-        objetivo = ahora_mx.replace(hour=hora, minute=0, second=0, microsecond=0)
-        if objetivo <= ahora_mx:
-            objetivo += timedelta(days=1)
-        await asyncio.sleep((objetivo - ahora_mx).total_seconds())
-        try:
-            await avisar_por_telegram(await _resumen_texto())
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"No se pudo mandar el resumen diario: {e}")
-
-
-def _esperando_txt(desde) -> str:
-    from datetime import datetime, timezone
-    d = desde if desde.tzinfo else desde.replace(tzinfo=timezone.utc)
-    mins = int((datetime.now(timezone.utc) - d).total_seconds() // 60)
-    if mins < 60:
-        return f"{mins} min"
-    return f"{mins // 60} h {mins % 60} min" if mins < 1440 else f"{mins // 1440} d"
-
-
-def _cliente_html(c: dict) -> str:
-    tel = c["telefono"]
-    if c["plataforma"] == "whatsapp":
-        return f'<a href="https://wa.me/{html.escape(tel)}" target="_blank">+{html.escape(tel)}</a>'
-    return f'{html.escape(c["plataforma"].capitalize())} ({html.escape(tel.split(":")[-1][-6:])})'
-
-
-@app.get("/panel", response_class=HTMLResponse)
-async def panel(token: str = ""):
-    """Panel del equipo: numeros del dia, quien espera a una persona y todas las conversaciones."""
-    if not _panel_autorizado(token):
-        raise HTTPException(status_code=404)
-    from urllib.parse import quote
-    t = html.escape(token, quote=True)
-    desde = _inicio_de_hoy()
-    m = await metricas(desde)
-    ultimos = await ultimo_aviso_por_telefono()
-    todas = await listar_atencion()
-
-    def boton(tel, accion, texto):
-        return (
-            f'<form method="post" action="/panel/accion" style="display:inline">'
-            f'<input type="hidden" name="token" value="{t}">'
-            f'<input type="hidden" name="telefono" value="{html.escape(tel, quote=True)}">'
-            f'<input type="hidden" name="accion" value="{accion}"><button>{texto}</button></form> '
-        )
-
-    def ver(tel):
-        return f'<a href="/panel/chat?token={quote(token)}&tel={quote(tel)}">Ver chat</a>'
-
-    # tarjetas
-    tarjetas = ""
-    for canal, c in m["por_canal"].items():
-        pct = round(100 * c["respondieron"] / c["nuevas"]) if c["nuevas"] else 0
-        tarjetas += (f'<div class="card"><b>{html.escape(canal.capitalize())}</b><br>{c["nuevas"]} nuevas hoy<br>'
-                     f'{c["respondieron"]} respondieron ({pct}%)</div>')
-    avisos_t = "".join(f"<div>{NOMBRES_TIPO.get(k, k)}: <b>{v}</b></div>" for k, v in m["avisos_por_tipo"].items()) or "Ninguno todavía"
-    tarjetas += f'<div class="card"><b>Pasadas al equipo hoy</b><br>{avisos_t}</div>'
-
-    # esperando persona
-    esp = [c for c in todas if c["necesita_persona"]]
-    filas_esp = ""
-    for c in esp:
-        u = ultimos.get(c["telefono"], {})
-        filas_esp += (
-            f'<tr class="alerta"><td>{NOMBRES_TIPO.get(u.get("tipo", "otro"), "🔵 Otro")}<br><small>{html.escape(c["motivo"])}</small></td>'
-            f'<td>{_cliente_html(c)}</td><td>{html.escape(c["texto"])}</td><td>{_esperando_txt(c["ultimo_en"])}</td>'
-            f'<td>{ver(c["telefono"])} {boton(c["telefono"], "atendido", "Ya lo atendí")}{boton(c["telefono"], "reactivar", "Reactivar Rory")}</td></tr>'
-        )
-    filas_esp = filas_esp or '<tr><td colspan="5">Nadie esperando 🎉</td></tr>'
-
-    # lo que Rory no sabe (hoy)
-    vacios = [a for a in m["avisos"] if a["tipo"] in ("duda_producto", "fuera_de_catalogo")]
-    lista_vacios = "".join(
-        f'<li>{NOMBRES_TIPO.get(a["tipo"], "")} — {html.escape(a["motivo"])}</li>' for a in vacios[:30]
-    ) or "<li>Nada por ahora</li>"
-
-    # calendario de entregas
-    hoy_iso = _fecha_hoy_iso()
-    rutas = await listar_rutas(hoy_iso)
-    entregas = await listar_entregas(hoy_iso)
-    por_fecha: dict[str, list] = {}
-    for e in entregas:
-        por_fecha.setdefault(e["fecha"], []).append(e)
-    nombres_cli = {c["telefono"]: c for c in todas}
-    filas_rutas = ""
-    for r in rutas:
-        det = ""
-        for e in por_fecha.get(r["fecha"], []):
-            col = "✅" if e["estado"] == "confirmada" else "⏳"
-            cli = nombres_cli.get(e["telefono"], {"telefono": e["telefono"], "plataforma": "whatsapp"})
-            det += (f'<div>{col} {html.escape(e["nombre"])} · {html.escape(e["zona"])} · {html.escape(e["pedido"])} · {_cliente_html(cli)} '
-                    f'{ver(e["telefono"])} '
-                    f'<form method="post" action="/panel/entrega" style="display:inline"><input type="hidden" name="token" value="{t}">'
-                    f'<input type="hidden" name="id" value="{e["id"]}">'
-                    f'<button name="estado" value="confirmada">Confirmar</button><button name="estado" value="cancelada">Cancelar</button></form></div>')
-        filas_rutas += (
-            f'<tr><td><b>{_fecha_bonita(r["fecha"])}</b><br><small>{r["fecha"]}</small></td>'
-            f'<td>{html.escape(", ".join(r["zonas"]))}</td><td>{html.escape(r["horario"])}</td>'
-            f'<td>{r["ocupados"]}/{r["cupo"]}</td><td>{det or "—"}</td>'
-            f'<td><form method="post" action="/panel/ruta/borrar"><input type="hidden" name="token" value="{t}">'
-            f'<input type="hidden" name="id" value="{r["id"]}"><button>Quitar día</button></form></td></tr>'
-        )
-    filas_rutas = filas_rutas or '<tr><td colspan="6">No hay días abiertos. Agrega uno abajo para que Rory pueda agendar.</td></tr>'
-    checks = "".join(f'<label><input type="checkbox" name="zonas" value="{z}"> {z}</label> ' for z in ZONAS_PUEBLA)
-    form_ruta = (
-        f'<form method="post" action="/panel/ruta"><input type="hidden" name="token" value="{t}">'
-        f'<p>Fecha: <input type="date" name="fecha" required> &nbsp; Horario: <input name="horario" placeholder="12:00 a 18:00" size="14"> '
-        f'&nbsp; Entregas que caben: <input type="number" name="cupo" value="6" min="1" style="width:60px"></p>'
-        f'<p>Zonas que cubres ese día: {checks}</p><button>Abrir día de entregas</button></form>'
-    )
-
-    # todas
-    filas = ""
-    for c in todas[:150]:
-        estado = "🔴 Necesita persona" if c["necesita_persona"] else "⏸️ Rory en pausa" if c["pausada"] else "🤖 Rory atiende"
-        hora = c["ultimo_en"].astimezone(_zona_mx()).strftime("%d/%m %H:%M")
-        filas += (f'<tr><td>{estado}</td><td>{_cliente_html(c)}</td><td>{html.escape(c["texto"])}</td><td>{hora}</td>'
-                  f'<td>{ver(c["telefono"])} {boton(c["telefono"], "pausar", "Yo me encargo")}{boton(c["telefono"], "reactivar", "Reactivar Rory")}</td></tr>')
-
-    return HTMLResponse(
-        "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
-        "<title>Rory — panel</title>"
-        "<style>body{font-family:system-ui;margin:16px;max-width:1100px}table{border-collapse:collapse;width:100%;margin-bottom:24px}"
-        "td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left;vertical-align:top;font-size:14px}"
-        "tr.alerta{background:#ffe8e8}button{padding:4px 8px;margin:2px 0}"
-        ".cards{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0 24px}.card{border:1px solid #ddd;border-radius:10px;padding:12px 16px;min-width:170px}</style>"
-        f"<h2>Rory — panel del equipo</h2><p><a href='?token={t}'>Actualizar</a> · <a href='/panel/practica?token={t}'>🎓 Practicar con Rory</a></p>"
-        f"<div class='cards'>{tarjetas}</div>"
-        f"<h3>Esperando a una persona ({len(esp)})</h3>"
-        "<table><tr><th>Tipo</th><th>Cliente</th><th>Último mensaje</th><th>Espera</th><th></th></tr>" + filas_esp + "</table>"
-        "<h3>Calendario de entregas</h3>"
-        "<table><tr><th>Día</th><th>Zonas</th><th>Horario</th><th>Agendadas</th><th>Entregas</th><th></th></tr>" + filas_rutas + "</table>"
-        + form_ruta +
-        f"<h3>Lo que Rory no supo contestar hoy</h3><ul>{lista_vacios}</ul>"
-        "<h3>Todas las conversaciones</h3>"
-        "<table><tr><th>Estado</th><th>Cliente</th><th>Último mensaje del cliente</th><th>Hora</th><th></th></tr>" + filas + "</table>"
-    )
-
-
-@app.get("/panel/chat", response_class=HTMLResponse)
-async def panel_chat(token: str = "", tel: str = ""):
-    """La conversacion completa de un cliente."""
-    if not _panel_autorizado(token):
-        raise HTTPException(status_code=404)
-    from urllib.parse import quote
-    msgs = await transcripcion(tel)
-    burbujas = ""
-    previo = ""
-    for x in msgs:
-        quien = "Cliente" if x["role"] == "user" else "Rory"
-        clase = "cli" if x["role"] == "user" else "rory"
-        hora = x["hora"].astimezone(_zona_mx()).strftime("%d/%m %H:%M")
-        corregir = ""
-        if x["role"] == "assistant" and previo:
-            modo_g = "tepeaca" if tel.startswith(("ig:", "fb:")) else "puebla"
-            corregir = (
-                f'<details><summary><small>✏️ Cómo lo habría dicho yo</small></summary>'
-                f'<form method="post" action="/panel/chat/ejemplo">'
-                f'<input type="hidden" name="token" value="{html.escape(token, quote=True)}">'
-                f'<input type="hidden" name="tel" value="{html.escape(tel, quote=True)}">'
-                f'<input type="hidden" name="modo" value="{modo_g}">'
-                f'<input type="hidden" name="cliente" value="{html.escape(previo, quote=True)}">'
-                f'<textarea name="respuesta" rows="3" style="width:100%" placeholder="Escribe cómo lo contestarías tú"></textarea>'
-                f'<input name="nota" style="width:100%" placeholder="Nota opcional (ej.: mando primero las fotos del paquete)">'
-                f'<button>Guardar como ejemplo</button></form></details>'
-            )
-        if x["role"] == "user":
-            previo = x["texto"]
-        burbujas += (f'<div class="b {clase}"><small>{quien} · {hora}</small><br>'
-                     f'{html.escape(x["texto"]).replace(chr(10), "<br>")}{corregir}</div>')
-    burbujas = burbujas or "<p>Todavía no hay mensajes guardados de esta conversación.</p>"
-    return HTMLResponse(
-        "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Rory — chat</title>"
-        "<style>body{font-family:system-ui;margin:16px;max-width:720px}.b{padding:8px 12px;border-radius:12px;margin:8px 0;max-width:85%}"
-        ".cli{background:#f1f1f1}.rory{background:#d9f2d9;margin-left:auto}small{color:#666}</style>"
-        f"<p><a href='/panel?token={quote(token)}'>← Volver al panel</a></p><h3>{html.escape(tel)}</h3>" + burbujas
-    )
-
-
-@app.post("/panel/accion")
-async def panel_accion(request: Request):
-    form = await request.form()
-    if not _panel_autorizado(str(form.get("token", ""))):
-        raise HTTPException(status_code=404)
-    tel, accion = str(form.get("telefono", "")), str(form.get("accion", ""))
-    if accion == "reactivar":
-        await reanudar(tel)
-        await marcar_necesita_persona(tel, False)
-    elif accion == "pausar":
-        await pausar(tel)
-    elif accion == "atendido":
-        await marcar_necesita_persona(tel, False)
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(f"/panel?token={form.get('token')}", status_code=303)
-
-
-@app.post("/panel/ruta")
-async def panel_ruta(request: Request):
-    from fastapi.responses import RedirectResponse
-    form = await request.form()
-    if not _panel_autorizado(str(form.get("token", ""))):
-        raise HTTPException(status_code=404)
-    zonas = [z for z in form.getlist("zonas") if z in ZONAS_PUEBLA]
-    fecha = str(form.get("fecha", ""))
-    if fecha and zonas:
-        try:
-            await crear_ruta(fecha, zonas, str(form.get("horario", "")), int(form.get("cupo") or 6))
-        except ValueError:
-            pass
-    return RedirectResponse(f"/panel?token={form.get('token')}", status_code=303)
-
-
-@app.post("/panel/ruta/borrar")
-async def panel_ruta_borrar(request: Request):
-    from fastapi.responses import RedirectResponse
-    form = await request.form()
-    if not _panel_autorizado(str(form.get("token", ""))):
-        raise HTTPException(status_code=404)
-    try:
-        await borrar_ruta(int(form.get("id") or 0))
-    except ValueError:
-        pass
-    return RedirectResponse(f"/panel?token={form.get('token')}", status_code=303)
-
-
-@app.post("/panel/entrega")
-async def panel_entrega(request: Request):
-    from fastapi.responses import RedirectResponse
-    form = await request.form()
-    if not _panel_autorizado(str(form.get("token", ""))):
-        raise HTTPException(status_code=404)
-    estado = str(form.get("estado", ""))
-    if estado in ("confirmada", "cancelada"):
-        try:
-            await cambiar_estado_entrega(int(form.get("id") or 0), estado)
-        except ValueError:
-            pass
-    return RedirectResponse(f"/panel?token={form.get('token')}", status_code=303)
-
-
-@app.post("/panel/chat/ejemplo")
-async def panel_chat_ejemplo(request: Request):
-    from fastapi.responses import RedirectResponse
-    from urllib.parse import quote
-    form = await request.form()
-    token = str(form.get("token", ""))
-    if not _panel_autorizado(token):
-        raise HTTPException(status_code=404)
-    await guardar_ejemplo(str(form.get("modo", "puebla")), str(form.get("cliente", "")),
-                          str(form.get("respuesta", "")), str(form.get("nota", "")))
-    return RedirectResponse(f"/panel/chat?token={quote(token)}&tel={quote(str(form.get('tel', '')))}", status_code=303)
-
-
-# ── Practica: simular conversaciones y ensenarle a Rory como responde el dueño ─────
-
-PAGINA_PRACTICA = """<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>
-<title>Rory — práctica</title>
-<style>body{font-family:system-ui;margin:16px;max-width:760px}.b{padding:8px 12px;border-radius:12px;margin:8px 0;max-width:88%;white-space:pre-wrap}
-.cli{background:#f1f1f1}.rory{background:#d9f2d9;margin-left:auto}.acc{font-size:13px;color:#555;margin:2px 0 2px auto;max-width:88%}
-small{color:#666}textarea,input[type=text]{width:100%;box-sizing:border-box;margin:4px 0}button{padding:6px 10px;margin:4px 4px 4px 0}
-#chat{min-height:120px;border:1px solid #ddd;border-radius:10px;padding:10px;margin:12px 0}.ej{border-bottom:1px solid #eee;padding:8px 0;font-size:14px}</style>
-<p><a href="/panel?token=__TOKENURL__">← Volver al panel</a></p>
-<h2>Práctica: enséñale a Rory cómo respondes tú</h2>
-<p>Escribe como si fueras un cliente. Rory contesta <b>sin mandar nada real</b>. Si no te gusta, pulsa "Así lo diría yo", escribe tu respuesta y Rory la usará de ejemplo.</p>
-<p>Campaña: <select id="modo"><option value="puebla">Puebla (WhatsApp)</option><option value="tepeaca">Tepeaca (Instagram/Facebook)</option></select>
-<button onclick="reiniciar()">Empezar otra conversación</button></p>
-<div id="chat"></div>
-<input id="txt" type="text" placeholder="Mensaje del cliente…" onkeydown="if(event.key==='Enter')enviar()"><button onclick="enviar()">Enviar</button>
-<h3>Ejemplos guardados (__NEJ__)</h3>__EJEMPLOS__
-<script>
-const TOKEN=__TOKENJSON__; let hist=[]; let ocupado=false;
-function esc(t){return t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-function reiniciar(){hist=[];document.getElementById('chat').innerHTML='';}
-async function enviar(){
-  if(ocupado)return; const i=document.getElementById('txt'); const texto=i.value.trim(); if(!texto)return; i.value='';
-  const chat=document.getElementById('chat'); chat.insertAdjacentHTML('beforeend','<div class="b cli"><small>Cliente</small><br>'+esc(texto)+'</div>');
-  ocupado=true; const esp=document.createElement('div'); esp.className='acc'; esp.textContent='Rory está escribiendo…'; chat.appendChild(esp);
-  try{
-    const r=await fetch('/panel/practica/mensaje',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,modo:document.getElementById('modo').value,historial:hist,texto:texto})});
-    const d=await r.json(); esp.remove();
-    (d.acciones||[]).forEach(a=>chat.insertAdjacentHTML('beforeend','<div class="acc">'+esc(a)+'</div>'));
-    const id='r'+Date.now();
-    chat.insertAdjacentHTML('beforeend','<div class="b rory" id="'+id+'"><small>Rory</small><br>'+esc(d.respuesta)+'<br>'
-      +'<button onclick="guardar(\''+id+'\',true)">👍 Así está bien</button><button onclick="abrir(\''+id+'\')">✏️ Así lo diría yo</button>'
-      +'<div id="'+id+'f" style="display:none"><textarea rows="3" placeholder="Escribe cómo lo contestarías tú"></textarea><input type="text" placeholder="Nota opcional (ej.: mando primero las fotos del paquete y luego el precio)"><button onclick="guardar(\''+id+'\',false)">Guardar ejemplo</button></div></div>');
-    document.getElementById(id).dataset.cliente=texto; document.getElementById(id).dataset.rory=d.respuesta;
-    hist.push({role:'user',content:texto}); hist.push({role:'assistant',content:d.respuesta});
-  }catch(e){esp.textContent='Error: '+e;} ocupado=false;
-}
-function abrir(id){document.getElementById(id+'f').style.display='block';}
-async function guardar(id,bueno){
-  const el=document.getElementById(id); let resp=el.dataset.rory, nota='';
-  if(!bueno){resp=el.querySelector('textarea').value.trim(); nota=el.querySelector('input').value.trim(); if(!resp){alert('Escribe tu respuesta');return;}}
-  await fetch('/panel/practica/ejemplo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,modo:document.getElementById('modo').value,cliente:el.dataset.cliente,respuesta:resp,nota:nota})});
-  el.insertAdjacentHTML('beforeend','<br><small>✅ Guardado. Rory lo usará como ejemplo.</small>');
-}
-</script>"""
-
-
-@app.get("/panel/practica", response_class=HTMLResponse)
-async def panel_practica(token: str = ""):
-    if not _panel_autorizado(token):
-        raise HTTPException(status_code=404)
-    import json as _json
-    from urllib.parse import quote
-    ejs = await listar_ejemplos(None, 100)
-    lista = "".join(
-        f'<div class="ej"><b>{html.escape(e["modo"])}</b> · Cliente: {html.escape(e["cliente"])}<br>Tú: {html.escape(e["respuesta"])}'
-        + (f'<br><small>Nota: {html.escape(e["nota"])}</small>' if e["nota"] else "")
-        + f'<form method="post" action="/panel/practica/borrar" style="display:inline"><input type="hidden" name="token" value="{html.escape(token, quote=True)}">'
-          f'<input type="hidden" name="id" value="{e["id"]}"> <button>Quitar</button></form></div>'
-        for e in ejs
-    ) or "<p>Todavía no hay ejemplos.</p>"
-    pagina = (PAGINA_PRACTICA.replace("__TOKENURL__", quote(token))
-              .replace("__TOKENJSON__", _json.dumps(token))
-              .replace("__NEJ__", str(len(ejs))).replace("__EJEMPLOS__", lista))
-    return HTMLResponse(pagina)
-
-
-@app.post("/panel/practica/mensaje")
-async def panel_practica_mensaje(request: Request):
-    """Rory contesta como si fuera real, pero sin mandar nada ni tocar clientes."""
-    datos = await request.json()
-    if not _panel_autorizado(str(datos.get("token", ""))):
-        raise HTTPException(status_code=404)
-    modo = "tepeaca" if datos.get("modo") == "tepeaca" else "puebla"
-    es_puebla = modo == "puebla"
-    historial = [h for h in (datos.get("historial") or []) if h.get("role") in ("user", "assistant")][-20:]
-    texto = str(datos.get("texto", ""))[:1000]
-    acciones: list[str] = []
-
-    async def foto(producto_id: str, todas: bool = False) -> str:
-        p = obtener_producto(producto_id)
-        acciones.append(f"📷 Mandaría {'todas las fotos' if todas else 'la foto'} de {p['nombre'] if p else producto_id}")
-        return "OK: foto enviada."
-
-    async def fotos_paquete(paquete: str) -> str:
-        acciones.append(f"📷 Mandaría una foto de cada juguete del paquete {paquete}")
-        return f"OK: fotos del paquete {paquete} enviadas."
-
-    async def catalogo() -> str:
-        acciones.append("📎 Mandaría el PDF del catálogo")
-        return "OK: catalogo en PDF enviado."
-
-    async def avisar(motivo: str, tipo: str = "otro") -> str:
-        acciones.append(f"🔔 Te avisaría ({tipo}): {motivo}")
-        return "OK: el equipo quedo avisado. Dile al cliente que un companero le contesta por este chat."
-
-    async def ver_dias(zona: str) -> str:
-        dias = await dias_disponibles(zona, _fecha_hoy_iso())
-        acciones.append(f"📅 Consultaría los días de entrega para {zona}")
-        if not dias:
-            return "No hay dias de entrega abiertos para esa zona por ahora. Usa avisar_equipo con tipo 'pedido'."
-        return "Dias disponibles en " + zona + ":\n" + "\n".join(
-            f"- {d['fecha']} ({_fecha_bonita(d['fecha'])}), horario {d['horario'] or 'por confirmar'}, quedan {d['quedan']} lugares"
-            for d in dias[:5])
-
-    async def agendar(fecha: str, zona: str, nombre: str, pedido: str) -> str:
-        acciones.append(f"📅 Agendaría la entrega ({fecha}, {zona}, {nombre}): {pedido}")
-        return f"OK: agendada para {fecha} en {zona}. Dile al cliente que quedo agendada y que un companero le confirma la existencia."
-
-    texto_ia = texto
-    if es_puebla and not historial:
-        acciones.append("📎 Mandaría el PDF de paquetes (automático en el primer mensaje)")
-        texto_ia += ("\n\n[Nota interna: el sistema ya le envió el PDF de paquetes en este turno; "
-                     "no uses enviar_catalogo.]")
-    respuesta, _ = await generar_respuesta(
-        texto_ia, historial, foto, catalogo, "whatsapp" if es_puebla else "instagram", modo, avisar,
-        fotos_paquete if es_puebla else None, ver_dias if es_puebla else None, agendar if es_puebla else None,
-        (await listar_ejemplos(modo, 15))[::-1],
-    )
-    return {"respuesta": respuesta, "acciones": acciones}
-
-
-@app.post("/panel/practica/ejemplo")
-async def panel_practica_ejemplo(request: Request):
-    datos = await request.json()
-    if not _panel_autorizado(str(datos.get("token", ""))):
-        raise HTTPException(status_code=404)
-    await guardar_ejemplo(str(datos.get("modo", "puebla")), str(datos.get("cliente", "")),
-                          str(datos.get("respuesta", "")), str(datos.get("nota", "")))
-    return {"ok": True}
-
-
-@app.post("/panel/practica/borrar")
-async def panel_practica_borrar(request: Request):
-    from fastapi.responses import RedirectResponse
-    from urllib.parse import quote
-    form = await request.form()
-    token = str(form.get("token", ""))
-    if not _panel_autorizado(token):
-        raise HTTPException(status_code=404)
-    try:
-        await borrar_ejemplo(int(form.get("id") or 0))
-    except ValueError:
-        pass
-    return RedirectResponse(f"/panel/practica?token={quote(token)}", status_code=303)
