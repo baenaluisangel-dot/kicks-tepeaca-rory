@@ -455,6 +455,44 @@ async def cambiar_estado_entrega(entrega_id: int, estado: str):
             await session.commit()
 
 
+class Ejemplo(Base):
+    """Como responde el dueño: se le muestran a Rory como ejemplos de estilo."""
+
+    __tablename__ = "ejemplos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    modo: Mapped[str] = mapped_column(String(20), default="puebla")
+    cliente: Mapped[str] = mapped_column(Text)
+    respuesta: Mapped[str] = mapped_column(Text)
+    nota: Mapped[str] = mapped_column(Text, default="")
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
+
+
+async def guardar_ejemplo(modo: str, cliente: str, respuesta: str, nota: str = ""):
+    if not cliente.strip() or not respuesta.strip():
+        return
+    async with async_session() as session:
+        session.add(Ejemplo(modo=modo if modo in ("puebla", "tepeaca") else "puebla",
+                            cliente=cliente.strip()[:600], respuesta=respuesta.strip()[:900],
+                            nota=(nota or "").strip()[:300], creado_en=ahora()))
+        await session.commit()
+
+
+async def listar_ejemplos(modo: str | None = None, limite: int = 200) -> list[dict]:
+    async with async_session() as session:
+        q = select(Ejemplo).order_by(Ejemplo.id.desc()).limit(limite)
+        if modo:
+            q = q.where(Ejemplo.modo == modo)
+        filas = (await session.execute(q)).scalars().all()
+    return [{"id": f.id, "modo": f.modo, "cliente": f.cliente, "respuesta": f.respuesta, "nota": f.nota} for f in filas]
+
+
+async def borrar_ejemplo(ejemplo_id: int):
+    async with async_session() as session:
+        await session.execute(delete(Ejemplo).where(Ejemplo.id == ejemplo_id))
+        await session.commit()
+
+
 async def inicializar_db():
     """Crea las tablas si no existen."""
     async with engine.begin() as conn:

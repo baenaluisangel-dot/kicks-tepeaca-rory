@@ -42,7 +42,10 @@ from agent.memory import (
     listar_atencion,
     marcar_necesita_persona,
     necesita_persona,
+    borrar_ejemplo,
     borrar_ruta,
+    guardar_ejemplo,
+    listar_ejemplos,
     cambiar_estado_entrega,
     crear_entrega,
     crear_ruta,
@@ -569,6 +572,7 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 enviar_fotos_paquete if es_puebla else None,
                 ver_dias_entrega if es_puebla else None,
                 agendar_entrega if es_puebla else None,
+                (await listar_ejemplos(modo, 15))[::-1],
             )
 
             enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto)
@@ -810,7 +814,7 @@ async def panel(token: str = ""):
         "td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left;vertical-align:top;font-size:14px}"
         "tr.alerta{background:#ffe8e8}button{padding:4px 8px;margin:2px 0}"
         ".cards{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0 24px}.card{border:1px solid #ddd;border-radius:10px;padding:12px 16px;min-width:170px}</style>"
-        f"<h2>Rory — panel del equipo</h2><p><a href='?token={t}'>Actualizar</a></p>"
+        f"<h2>Rory — panel del equipo</h2><p><a href='?token={t}'>Actualizar</a> · <a href='/panel/practica?token={t}'>🎓 Practicar con Rory</a></p>"
         f"<div class='cards'>{tarjetas}</div>"
         f"<h3>Esperando a una persona ({len(esp)})</h3>"
         "<table><tr><th>Tipo</th><th>Cliente</th><th>Último mensaje</th><th>Espera</th><th></th></tr>" + filas_esp + "</table>"
@@ -831,12 +835,29 @@ async def panel_chat(token: str = "", tel: str = ""):
     from urllib.parse import quote
     msgs = await transcripcion(tel)
     burbujas = ""
+    previo = ""
     for x in msgs:
         quien = "Cliente" if x["role"] == "user" else "Rory"
         clase = "cli" if x["role"] == "user" else "rory"
         hora = x["hora"].astimezone(_zona_mx()).strftime("%d/%m %H:%M")
+        corregir = ""
+        if x["role"] == "assistant" and previo:
+            modo_g = "tepeaca" if tel.startswith(("ig:", "fb:")) else "puebla"
+            corregir = (
+                f'<details><summary><small>✏️ Cómo lo habría dicho yo</small></summary>'
+                f'<form method="post" action="/panel/chat/ejemplo">'
+                f'<input type="hidden" name="token" value="{html.escape(token, quote=True)}">'
+                f'<input type="hidden" name="tel" value="{html.escape(tel, quote=True)}">'
+                f'<input type="hidden" name="modo" value="{modo_g}">'
+                f'<input type="hidden" name="cliente" value="{html.escape(previo, quote=True)}">'
+                f'<textarea name="respuesta" rows="3" style="width:100%" placeholder="Escribe cómo lo contestarías tú"></textarea>'
+                f'<input name="nota" style="width:100%" placeholder="Nota opcional (ej.: mando primero las fotos del paquete)">'
+                f'<button>Guardar como ejemplo</button></form></details>'
+            )
+        if x["role"] == "user":
+            previo = x["texto"]
         burbujas += (f'<div class="b {clase}"><small>{quien} · {hora}</small><br>'
-                     f'{html.escape(x["texto"]).replace(chr(10), "<br>")}</div>')
+                     f'{html.escape(x["texto"]).replace(chr(10), "<br>")}{corregir}</div>')
     burbujas = burbujas or "<p>Todavía no hay mensajes guardados de esta conversación.</p>"
     return HTMLResponse(
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Rory — chat</title>"
@@ -905,3 +926,162 @@ async def panel_entrega(request: Request):
         except ValueError:
             pass
     return RedirectResponse(f"/panel?token={form.get('token')}", status_code=303)
+
+
+@app.post("/panel/chat/ejemplo")
+async def panel_chat_ejemplo(request: Request):
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+    form = await request.form()
+    token = str(form.get("token", ""))
+    if not _panel_autorizado(token):
+        raise HTTPException(status_code=404)
+    await guardar_ejemplo(str(form.get("modo", "puebla")), str(form.get("cliente", "")),
+                          str(form.get("respuesta", "")), str(form.get("nota", "")))
+    return RedirectResponse(f"/panel/chat?token={quote(token)}&tel={quote(str(form.get('tel', '')))}", status_code=303)
+
+
+# ── Practica: simular conversaciones y ensenarle a Rory como responde el dueño ─────
+
+PAGINA_PRACTICA = """<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>
+<title>Rory — práctica</title>
+<style>body{font-family:system-ui;margin:16px;max-width:760px}.b{padding:8px 12px;border-radius:12px;margin:8px 0;max-width:88%;white-space:pre-wrap}
+.cli{background:#f1f1f1}.rory{background:#d9f2d9;margin-left:auto}.acc{font-size:13px;color:#555;margin:2px 0 2px auto;max-width:88%}
+small{color:#666}textarea,input[type=text]{width:100%;box-sizing:border-box;margin:4px 0}button{padding:6px 10px;margin:4px 4px 4px 0}
+#chat{min-height:120px;border:1px solid #ddd;border-radius:10px;padding:10px;margin:12px 0}.ej{border-bottom:1px solid #eee;padding:8px 0;font-size:14px}</style>
+<p><a href="/panel?token=__TOKENURL__">← Volver al panel</a></p>
+<h2>Práctica: enséñale a Rory cómo respondes tú</h2>
+<p>Escribe como si fueras un cliente. Rory contesta <b>sin mandar nada real</b>. Si no te gusta, pulsa "Así lo diría yo", escribe tu respuesta y Rory la usará de ejemplo.</p>
+<p>Campaña: <select id="modo"><option value="puebla">Puebla (WhatsApp)</option><option value="tepeaca">Tepeaca (Instagram/Facebook)</option></select>
+<button onclick="reiniciar()">Empezar otra conversación</button></p>
+<div id="chat"></div>
+<input id="txt" type="text" placeholder="Mensaje del cliente…" onkeydown="if(event.key==='Enter')enviar()"><button onclick="enviar()">Enviar</button>
+<h3>Ejemplos guardados (__NEJ__)</h3>__EJEMPLOS__
+<script>
+const TOKEN=__TOKENJSON__; let hist=[]; let ocupado=false;
+function esc(t){return t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function reiniciar(){hist=[];document.getElementById('chat').innerHTML='';}
+async function enviar(){
+  if(ocupado)return; const i=document.getElementById('txt'); const texto=i.value.trim(); if(!texto)return; i.value='';
+  const chat=document.getElementById('chat'); chat.insertAdjacentHTML('beforeend','<div class="b cli"><small>Cliente</small><br>'+esc(texto)+'</div>');
+  ocupado=true; const esp=document.createElement('div'); esp.className='acc'; esp.textContent='Rory está escribiendo…'; chat.appendChild(esp);
+  try{
+    const r=await fetch('/panel/practica/mensaje',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,modo:document.getElementById('modo').value,historial:hist,texto:texto})});
+    const d=await r.json(); esp.remove();
+    (d.acciones||[]).forEach(a=>chat.insertAdjacentHTML('beforeend','<div class="acc">'+esc(a)+'</div>'));
+    const id='r'+Date.now();
+    chat.insertAdjacentHTML('beforeend','<div class="b rory" id="'+id+'"><small>Rory</small><br>'+esc(d.respuesta)+'<br>'
+      +'<button onclick="guardar(\''+id+'\',true)">👍 Así está bien</button><button onclick="abrir(\''+id+'\')">✏️ Así lo diría yo</button>'
+      +'<div id="'+id+'f" style="display:none"><textarea rows="3" placeholder="Escribe cómo lo contestarías tú"></textarea><input type="text" placeholder="Nota opcional (ej.: mando primero las fotos del paquete y luego el precio)"><button onclick="guardar(\''+id+'\',false)">Guardar ejemplo</button></div></div>');
+    document.getElementById(id).dataset.cliente=texto; document.getElementById(id).dataset.rory=d.respuesta;
+    hist.push({role:'user',content:texto}); hist.push({role:'assistant',content:d.respuesta});
+  }catch(e){esp.textContent='Error: '+e;} ocupado=false;
+}
+function abrir(id){document.getElementById(id+'f').style.display='block';}
+async function guardar(id,bueno){
+  const el=document.getElementById(id); let resp=el.dataset.rory, nota='';
+  if(!bueno){resp=el.querySelector('textarea').value.trim(); nota=el.querySelector('input').value.trim(); if(!resp){alert('Escribe tu respuesta');return;}}
+  await fetch('/panel/practica/ejemplo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,modo:document.getElementById('modo').value,cliente:el.dataset.cliente,respuesta:resp,nota:nota})});
+  el.insertAdjacentHTML('beforeend','<br><small>✅ Guardado. Rory lo usará como ejemplo.</small>');
+}
+</script>"""
+
+
+@app.get("/panel/practica", response_class=HTMLResponse)
+async def panel_practica(token: str = ""):
+    if not _panel_autorizado(token):
+        raise HTTPException(status_code=404)
+    import json as _json
+    from urllib.parse import quote
+    ejs = await listar_ejemplos(None, 100)
+    lista = "".join(
+        f'<div class="ej"><b>{html.escape(e["modo"])}</b> · Cliente: {html.escape(e["cliente"])}<br>Tú: {html.escape(e["respuesta"])}'
+        + (f'<br><small>Nota: {html.escape(e["nota"])}</small>' if e["nota"] else "")
+        + f'<form method="post" action="/panel/practica/borrar" style="display:inline"><input type="hidden" name="token" value="{html.escape(token, quote=True)}">'
+          f'<input type="hidden" name="id" value="{e["id"]}"> <button>Quitar</button></form></div>'
+        for e in ejs
+    ) or "<p>Todavía no hay ejemplos.</p>"
+    pagina = (PAGINA_PRACTICA.replace("__TOKENURL__", quote(token))
+              .replace("__TOKENJSON__", _json.dumps(token))
+              .replace("__NEJ__", str(len(ejs))).replace("__EJEMPLOS__", lista))
+    return HTMLResponse(pagina)
+
+
+@app.post("/panel/practica/mensaje")
+async def panel_practica_mensaje(request: Request):
+    """Rory contesta como si fuera real, pero sin mandar nada ni tocar clientes."""
+    datos = await request.json()
+    if not _panel_autorizado(str(datos.get("token", ""))):
+        raise HTTPException(status_code=404)
+    modo = "tepeaca" if datos.get("modo") == "tepeaca" else "puebla"
+    es_puebla = modo == "puebla"
+    historial = [h for h in (datos.get("historial") or []) if h.get("role") in ("user", "assistant")][-20:]
+    texto = str(datos.get("texto", ""))[:1000]
+    acciones: list[str] = []
+
+    async def foto(producto_id: str, todas: bool = False) -> str:
+        p = obtener_producto(producto_id)
+        acciones.append(f"📷 Mandaría {'todas las fotos' if todas else 'la foto'} de {p['nombre'] if p else producto_id}")
+        return "OK: foto enviada."
+
+    async def fotos_paquete(paquete: str) -> str:
+        acciones.append(f"📷 Mandaría una foto de cada juguete del paquete {paquete}")
+        return f"OK: fotos del paquete {paquete} enviadas."
+
+    async def catalogo() -> str:
+        acciones.append("📎 Mandaría el PDF del catálogo")
+        return "OK: catalogo en PDF enviado."
+
+    async def avisar(motivo: str, tipo: str = "otro") -> str:
+        acciones.append(f"🔔 Te avisaría ({tipo}): {motivo}")
+        return "OK: el equipo quedo avisado. Dile al cliente que un companero le contesta por este chat."
+
+    async def ver_dias(zona: str) -> str:
+        dias = await dias_disponibles(zona, _fecha_hoy_iso())
+        acciones.append(f"📅 Consultaría los días de entrega para {zona}")
+        if not dias:
+            return "No hay dias de entrega abiertos para esa zona por ahora. Usa avisar_equipo con tipo 'pedido'."
+        return "Dias disponibles en " + zona + ":\n" + "\n".join(
+            f"- {d['fecha']} ({_fecha_bonita(d['fecha'])}), horario {d['horario'] or 'por confirmar'}, quedan {d['quedan']} lugares"
+            for d in dias[:5])
+
+    async def agendar(fecha: str, zona: str, nombre: str, pedido: str) -> str:
+        acciones.append(f"📅 Agendaría la entrega ({fecha}, {zona}, {nombre}): {pedido}")
+        return f"OK: agendada para {fecha} en {zona}. Dile al cliente que quedo agendada y que un companero le confirma la existencia."
+
+    texto_ia = texto
+    if es_puebla and not historial:
+        acciones.append("📎 Mandaría el PDF de paquetes (automático en el primer mensaje)")
+        texto_ia += ("\n\n[Nota interna: el sistema ya le envió el PDF de paquetes en este turno; "
+                     "no uses enviar_catalogo.]")
+    respuesta, _ = await generar_respuesta(
+        texto_ia, historial, foto, catalogo, "whatsapp" if es_puebla else "instagram", modo, avisar,
+        fotos_paquete if es_puebla else None, ver_dias if es_puebla else None, agendar if es_puebla else None,
+        (await listar_ejemplos(modo, 15))[::-1],
+    )
+    return {"respuesta": respuesta, "acciones": acciones}
+
+
+@app.post("/panel/practica/ejemplo")
+async def panel_practica_ejemplo(request: Request):
+    datos = await request.json()
+    if not _panel_autorizado(str(datos.get("token", ""))):
+        raise HTTPException(status_code=404)
+    await guardar_ejemplo(str(datos.get("modo", "puebla")), str(datos.get("cliente", "")),
+                          str(datos.get("respuesta", "")), str(datos.get("nota", "")))
+    return {"ok": True}
+
+
+@app.post("/panel/practica/borrar")
+async def panel_practica_borrar(request: Request):
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+    form = await request.form()
+    token = str(form.get("token", ""))
+    if not _panel_autorizado(token):
+        raise HTTPException(status_code=404)
+    try:
+        await borrar_ejemplo(int(form.get("id") or 0))
+    except ValueError:
+        pass
+    return RedirectResponse(f"/panel/practica?token={quote(token)}", status_code=303)

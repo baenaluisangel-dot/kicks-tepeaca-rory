@@ -230,6 +230,7 @@ async def generar_respuesta(
     enviar_fotos_paquete=None,
     ver_dias=None,
     agendar=None,
+    ejemplos=None,
 ) -> tuple[str, bool]:
     """
     Genera una respuesta con Claude.
@@ -280,6 +281,14 @@ async def generar_respuesta(
             "dio sus datos, pide hablar con una persona, tiene una queja, quiere colaborar o "
             "preguntas algo que no sabes. Es mejor avisar que inventar.\n"
         )
+    if ejemplos:
+        bloque = "\n\n## Así responde el dueño (imita su tono, su largo y su forma de cerrar)\n"
+        bloque += "Son ejemplos reales de referencia; no los copies literal si el contexto cambia.\n"
+        for e in ejemplos:
+            bloque += f"\nCliente: {e['cliente']}\nRespuesta del dueño: {e['respuesta']}\n"
+            if e.get("nota"):
+                bloque += f"(Nota: {e['nota']})\n"
+        system_prompt += bloque
     extras = {"output_config": {"effort": ESFUERZO}} if (_soporta_esfuerzo and ESFUERZO) else {}
 
     async def _llamar(parametros_extra: dict):
