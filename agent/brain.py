@@ -111,9 +111,19 @@ HERRAMIENTA_EQUIPO = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "motivo": {"type": "string", "description": "Resumen corto: que quiere el cliente."}
+            "motivo": {"type": "string", "description": "Resumen corto: que quiere el cliente."},
+            "tipo": {
+                "type": "string",
+                "enum": ["pedido", "duda_producto", "fuera_de_catalogo", "queja_o_problema", "otro"],
+                "description": (
+                    "pedido = ya eligio producto y dio datos de entrega (nombre/zona); "
+                    "duda_producto = pregunta algo del producto que no sabes (medidas, funciones, pilas...); "
+                    "fuera_de_catalogo = pide algo que no vendemos en esta campana; "
+                    "queja_o_problema = queja, pago, comprobante; otro = lo demas."
+                ),
+            },
         },
-        "required": ["motivo"],
+        "required": ["motivo", "tipo"],
     },
 }
 
@@ -302,7 +312,9 @@ async def generar_respuesta(
                 if resultado.startswith("OK"):
                     fotos_enviadas += 1
             elif bloque.name == "avisar_equipo" and avisar_equipo:
-                resultado = await avisar_equipo((bloque.input or {}).get("motivo", ""))
+                resultado = await avisar_equipo(
+                    (bloque.input or {}).get("motivo", ""), (bloque.input or {}).get("tipo", "otro")
+                )
             else:
                 resultado = "Herramienta no disponible."
             resultados.append(

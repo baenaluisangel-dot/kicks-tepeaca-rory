@@ -13,7 +13,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
-from sqlalchemy import DateTime, Integer, String, Text, delete, select
+from sqlalchemy import DateTime, Integer, String, Text, case, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -262,6 +262,84 @@ async def cargar_pendientes() -> list[dict]:
             "mensaje_id": f.mensaje_id, "contexto": ctx, "creado_en": f.creado_en,
         })
     return salida
+
+
+class Aviso(Base):
+    """Cada vez que Rory pasa una conversacion al equipo (con tipo y motivo)."""
+
+    __tablename__ = "avisos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telefono: Mapped[str] = mapped_column(String(50), index=True)
+    tipo: Mapped[str] = mapped_column(String(30), default="otro")
+    motivo: Mapped[str] = mapped_column(Text, default="")
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
+
+
+async def registrar_aviso(telefono: str, tipo: str, motivo: str):
+    async with async_session() as session:
+        session.add(Aviso(telefono=telefono, tipo=tipo or "otro", motivo=(motivo or "")[:500], creado_en=ahora()))
+        await session.commit()
+
+
+async def listar_avisos(desde: datetime) -> list[dict]:
+    async with async_session() as session:
+        filas = (await session.execute(
+            select(Aviso).where(Aviso.creado_en >= desde).order_by(Aviso.id.desc())
+        )).scalars().all()
+    return [{"telefono": f.telefono, "tipo": f.tipo, "motivo": f.motivo, "creado_en": f.creado_en} for f in filas]
+
+
+async def ultimo_aviso_por_telefono() -> dict[str, dict]:
+    async with async_session() as session:
+        filas = (await session.execute(select(Aviso).order_by(Aviso.id))).scalars().all()
+    return {f.telefono: {"tipo": f.tipo, "motivo": f.motivo} for f in filas}  # el ultimo gana
+
+
+async def transcripcion(telefono: str, limite: int = 200) -> list[dict]:
+    """Toda la conversacion guardada (mas vieja primero), sin las notas internas."""
+    import re
+    async with async_session() as session:
+        filas = (await session.execute(
+            select(Mensaje).where(Mensaje.telefono == telefono).order_by(Mensaje.id.desc()).limit(limite)
+        )).scalars().all()
+    filas.reverse()
+    return [
+        {
+            "role": f.role,
+            "texto": re.sub(r"\n?\[Nota interna:.*?\]", "", f.content, flags=re.S).strip(),
+            "hora": f.timestamp,
+        }
+        for f in filas
+    ]
+
+
+async def metricas(desde: datetime) -> dict:
+    """Numeros del periodo: conversaciones nuevas, cuantas respondieron, avisos por tipo."""
+    async with async_session() as session:
+        filas = (await session.execute(
+            select(
+                Mensaje.telefono,
+                func.min(Mensaje.timestamp),
+                func.sum(case((Mensaje.role == "user", 1), else_=0)),
+            ).group_by(Mensaje.telefono)
+        )).all()
+    def aware(d):
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    nuevas = [(t, int(n or 0)) for t, primero, n in filas if aware(primero) >= desde]
+    def canal(t):
+        return "instagram" if t.startswith("ig:") else "facebook" if t.startswith("fb:") else "whatsapp"
+    por_canal: dict[str, dict] = {}
+    for t, n in nuevas:
+        c = por_canal.setdefault(canal(t), {"nuevas": 0, "respondieron": 0})
+        c["nuevas"] += 1
+        if n >= 2:
+            c["respondieron"] += 1
+    avisos = await listar_avisos(desde)
+    por_tipo: dict[str, int] = {}
+    for a in avisos:
+        por_tipo[a["tipo"]] = por_tipo.get(a["tipo"], 0) + 1
+    return {"por_canal": por_canal, "avisos": avisos, "avisos_por_tipo": por_tipo}
 
 
 async def inicializar_db():

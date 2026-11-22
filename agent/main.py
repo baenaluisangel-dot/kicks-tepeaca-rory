@@ -41,7 +41,12 @@ from agent.memory import (
     listar_atencion,
     marcar_necesita_persona,
     necesita_persona,
+    listar_avisos,
+    metricas,
+    registrar_aviso,
     registrar_mensaje_cliente,
+    transcripcion,
+    ultimo_aviso_por_telefono,
     guardar_modo,
     obtener_modo,
     pausar,
@@ -99,6 +104,7 @@ async def lifespan(app: FastAPI):
     await limpiar_eventos_viejos()
     logger.info("Base de datos lista")
     await recuperar_pendientes()
+    asyncio.create_task(_bucle_resumen_diario())
     logger.info(f"Servidor AgentKit escuchando en el puerto {PORT}")
 
     global estado_proveedor
@@ -311,6 +317,16 @@ async def recuperar_pendientes():
         logger.info(f"Se recuperaron {len(filas)} mensajes pendientes tras el reinicio")
 
 
+def _texto_del_lote(lote: list) -> str:
+    """Junta los mensajes del cliente. Los '[Unsupported message]' (imagenes, audios, la
+    tarjeta del anuncio) se descartan si hay texto real junto a ellos."""
+    textos = [m.texto.strip() for m in lote]
+    reales = [x for x in textos if x != "[Unsupported message]"]
+    if reales:
+        return "\n".join(reales)
+    return "[El cliente mandó un archivo, foto o nota de voz que no se puede leer]"
+
+
 async def _trabajador(telefono: str):
     try:
         while _pendientes.get(telefono):
@@ -336,7 +352,7 @@ async def _trabajador(telefono: str):
                 continue
             unido = MensajeEntrante(
                 telefono=telefono,
-                texto="\n".join(m.texto.strip() for m in lote),
+                texto=_texto_del_lote(lote),
                 mensaje_id=ultimo.mensaje_id,
                 es_propio=False,
                 contexto=ultimo.contexto,
@@ -489,14 +505,17 @@ async def procesar_mensaje(msg: MensajeEntrante):
                         "turno; no uses enviar_catalogo.]"
                     )
 
-            async def avisar_equipo(motivo: str) -> str:
+            async def avisar_equipo(motivo: str, tipo: str = "otro") -> str:
                 """La usa Claude: deja la conversacion marcada para una persona y pausa a Rory."""
                 await marcar_necesita_persona(msg.telefono, True, motivo)
+                await registrar_aviso(msg.telefono, tipo, motivo)
                 await pausar(msg.telefono, HORAS_PAUSA_AVISO)
-                logger.info(f"{msg.telefono}: necesita persona — {motivo}")
+                logger.info(f"{msg.telefono}: necesita persona ({tipo}) — {motivo}")
+                icono = {"pedido": "🟢 PEDIDO LISTO", "duda_producto": "🟠 Duda de producto",
+                         "fuera_de_catalogo": "🟡 Pide algo que no tenemos", "queja_o_problema": "🔴 Queja o problema"
+                         }.get(tipo, "🔵 Necesita apoyo")
                 await avisar_por_telegram(
-                    f"🔴 Rory necesita apoyo con un cliente.\n"
-                    f"Cliente: {enlace_cliente(msg.telefono, plataforma)}\n"
+                    f"{icono}\nCliente: {enlace_cliente(msg.telefono, plataforma)}\n"
                     f"Motivo: {motivo}\nÚltimo mensaje: {msg.texto[:300]}"
                 )
                 return "OK: el equipo quedo avisado. Dile al cliente que un companero le contesta por este chat."
@@ -558,54 +577,172 @@ def _panel_autorizado(token: str) -> bool:
     return bool(PANEL_TOKEN) and hmac.compare_digest(token or "", PANEL_TOKEN)
 
 
+def _zona_mx():
+    """Hora de Mexico (Puebla): UTC-6 fijo, sin horario de verano desde 2022."""
+    from datetime import timedelta, timezone
+    return timezone(timedelta(hours=-6))
+
+
+def _inicio_de_hoy():
+    from datetime import datetime
+    z = _zona_mx()
+    return datetime.now(z).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+NOMBRES_TIPO = {
+    "pedido": "🟢 Pedido listo", "duda_producto": "🟠 Duda de producto",
+    "fuera_de_catalogo": "🟡 Pide algo que no tenemos", "queja_o_problema": "🔴 Queja o problema",
+    "otro": "🔵 Otro",
+}
+
+
+async def _resumen_texto() -> str:
+    """Resumen del dia (hora de Mexico) para Telegram y para el panel."""
+    desde = _inicio_de_hoy()
+    m = await metricas(desde)
+    lineas = [f"📊 Resumen de hoy ({desde.strftime('%d/%m')})"]
+    for canal, c in m["por_canal"].items():
+        pct = round(100 * c["respondieron"] / c["nuevas"]) if c["nuevas"] else 0
+        lineas.append(f"{canal.capitalize()}: {c['nuevas']} conversaciones nuevas, {c['respondieron']} respondieron ({pct}%)")
+    if not m["por_canal"]:
+        lineas.append("Sin conversaciones nuevas.")
+    if m["avisos_por_tipo"]:
+        lineas.append("Pasadas al equipo: " + ", ".join(f"{NOMBRES_TIPO.get(t, t)} {n}" for t, n in m["avisos_por_tipo"].items()))
+    esperando = [c for c in await listar_atencion() if c["necesita_persona"]]
+    lineas.append(f"Esperando a una persona ahora: {len(esperando)}")
+    for c in esperando[:10]:
+        lineas.append(f"• {enlace_cliente(c['telefono'], c['plataforma'])} — {c['motivo'][:90]}")
+    return "\n".join(lineas)
+
+
+async def _bucle_resumen_diario():
+    """Manda el resumen por Telegram todos los dias a HORA_RESUMEN (hora de Mexico)."""
+    from datetime import datetime, timedelta
+    hora = int(os.getenv("HORA_RESUMEN") or "21")
+    while True:
+        z = _zona_mx()
+        ahora_mx = datetime.now(z)
+        objetivo = ahora_mx.replace(hour=hora, minute=0, second=0, microsecond=0)
+        if objetivo <= ahora_mx:
+            objetivo += timedelta(days=1)
+        await asyncio.sleep((objetivo - ahora_mx).total_seconds())
+        try:
+            await avisar_por_telegram(await _resumen_texto())
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"No se pudo mandar el resumen diario: {e}")
+
+
+def _esperando_txt(desde) -> str:
+    from datetime import datetime, timezone
+    d = desde if desde.tzinfo else desde.replace(tzinfo=timezone.utc)
+    mins = int((datetime.now(timezone.utc) - d).total_seconds() // 60)
+    if mins < 60:
+        return f"{mins} min"
+    return f"{mins // 60} h {mins % 60} min" if mins < 1440 else f"{mins // 1440} d"
+
+
+def _cliente_html(c: dict) -> str:
+    tel = c["telefono"]
+    if c["plataforma"] == "whatsapp":
+        return f'<a href="https://wa.me/{html.escape(tel)}" target="_blank">+{html.escape(tel)}</a>'
+    return f'{html.escape(c["plataforma"].capitalize())} ({html.escape(tel.split(":")[-1][-6:])})'
+
+
 @app.get("/panel", response_class=HTMLResponse)
 async def panel(token: str = ""):
-    """Lista de conversaciones: cuales necesitan una persona y cuales tiene Rory."""
+    """Panel del equipo: numeros del dia, quien espera a una persona y todas las conversaciones."""
     if not _panel_autorizado(token):
         raise HTTPException(status_code=404)
+    from urllib.parse import quote
     t = html.escape(token, quote=True)
-    filas = []
-    for c in await listar_atencion():
-        if c["necesita_persona"]:
-            estado = "🔴 Necesita persona"
-        elif c["pausada"]:
-            estado = "⏸️ Rory en pausa"
-        else:
-            estado = "🤖 Rory atiende"
-        tel = c["telefono"]
-        if c["plataforma"] == "whatsapp":
-            enlace = f'<a href="https://wa.me/{html.escape(tel)}" target="_blank">+{html.escape(tel)}</a>'
-        else:
-            enlace = f'{html.escape(c["plataforma"].capitalize())} ({html.escape(tel.split(":")[-1][-6:])})'
-        hora = c["ultimo_en"].astimezone().strftime("%d/%m %H:%M")
+    desde = _inicio_de_hoy()
+    m = await metricas(desde)
+    ultimos = await ultimo_aviso_por_telefono()
+    todas = await listar_atencion()
 
-        def boton(accion, texto):
-            return (
-                f'<form method="post" action="/panel/accion" style="display:inline">'
-                f'<input type="hidden" name="token" value="{t}">'
-                f'<input type="hidden" name="telefono" value="{html.escape(tel, quote=True)}">'
-                f'<input type="hidden" name="accion" value="{accion}"><button>{texto}</button></form> '
-            )
-
-        botones = boton("reactivar", "Reactivar Rory") + boton("pausar", "Yo me encargo")
-        if c["necesita_persona"]:
-            botones += boton("atendido", "Ya lo atendí")
-        motivo = f'<br><small>{html.escape(c["motivo"])}</small>' if c["motivo"] else ""
-        clase = "alerta" if c["necesita_persona"] else ""
-        filas.append(
-            f'<tr class="{clase}"><td>{estado}{motivo}</td><td>{enlace}</td>'
-            f'<td>{html.escape(c["texto"])}</td><td>{hora}</td><td>{botones}</td></tr>'
+    def boton(tel, accion, texto):
+        return (
+            f'<form method="post" action="/panel/accion" style="display:inline">'
+            f'<input type="hidden" name="token" value="{t}">'
+            f'<input type="hidden" name="telefono" value="{html.escape(tel, quote=True)}">'
+            f'<input type="hidden" name="accion" value="{accion}"><button>{texto}</button></form> '
         )
-    cuerpo = "".join(filas) or '<tr><td colspan="5">Sin conversaciones todavía.</td></tr>'
+
+    def ver(tel):
+        return f'<a href="/panel/chat?token={quote(token)}&tel={quote(tel)}">Ver chat</a>'
+
+    # tarjetas
+    tarjetas = ""
+    for canal, c in m["por_canal"].items():
+        pct = round(100 * c["respondieron"] / c["nuevas"]) if c["nuevas"] else 0
+        tarjetas += (f'<div class="card"><b>{html.escape(canal.capitalize())}</b><br>{c["nuevas"]} nuevas hoy<br>'
+                     f'{c["respondieron"]} respondieron ({pct}%)</div>')
+    avisos_t = "".join(f"<div>{NOMBRES_TIPO.get(k, k)}: <b>{v}</b></div>" for k, v in m["avisos_por_tipo"].items()) or "Ninguno todavía"
+    tarjetas += f'<div class="card"><b>Pasadas al equipo hoy</b><br>{avisos_t}</div>'
+
+    # esperando persona
+    esp = [c for c in todas if c["necesita_persona"]]
+    filas_esp = ""
+    for c in esp:
+        u = ultimos.get(c["telefono"], {})
+        filas_esp += (
+            f'<tr class="alerta"><td>{NOMBRES_TIPO.get(u.get("tipo", "otro"), "🔵 Otro")}<br><small>{html.escape(c["motivo"])}</small></td>'
+            f'<td>{_cliente_html(c)}</td><td>{html.escape(c["texto"])}</td><td>{_esperando_txt(c["ultimo_en"])}</td>'
+            f'<td>{ver(c["telefono"])} {boton(c["telefono"], "atendido", "Ya lo atendí")}{boton(c["telefono"], "reactivar", "Reactivar Rory")}</td></tr>'
+        )
+    filas_esp = filas_esp or '<tr><td colspan="5">Nadie esperando 🎉</td></tr>'
+
+    # lo que Rory no sabe (hoy)
+    vacios = [a for a in m["avisos"] if a["tipo"] in ("duda_producto", "fuera_de_catalogo")]
+    lista_vacios = "".join(
+        f'<li>{NOMBRES_TIPO.get(a["tipo"], "")} — {html.escape(a["motivo"])}</li>' for a in vacios[:30]
+    ) or "<li>Nada por ahora</li>"
+
+    # todas
+    filas = ""
+    for c in todas[:150]:
+        estado = "🔴 Necesita persona" if c["necesita_persona"] else "⏸️ Rory en pausa" if c["pausada"] else "🤖 Rory atiende"
+        hora = c["ultimo_en"].astimezone(_zona_mx()).strftime("%d/%m %H:%M")
+        filas += (f'<tr><td>{estado}</td><td>{_cliente_html(c)}</td><td>{html.escape(c["texto"])}</td><td>{hora}</td>'
+                  f'<td>{ver(c["telefono"])} {boton(c["telefono"], "pausar", "Yo me encargo")}{boton(c["telefono"], "reactivar", "Reactivar Rory")}</td></tr>')
+
     return HTMLResponse(
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
-        "<title>Rory — conversaciones</title>"
-        "<style>body{font-family:system-ui;margin:16px}table{border-collapse:collapse;width:100%}"
-        "td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left;vertical-align:top}"
-        "tr.alerta{background:#ffe8e8}button{padding:4px 8px;margin:2px 0}</style>"
-        "<h2>Conversaciones de Rory</h2><p><a href='?token=" + t + "'>Actualizar</a></p>"
-        "<table><tr><th>Estado</th><th>Cliente</th><th>Último mensaje</th><th>Hora</th><th></th></tr>"
-        + cuerpo + "</table>"
+        "<title>Rory — panel</title>"
+        "<style>body{font-family:system-ui;margin:16px;max-width:1100px}table{border-collapse:collapse;width:100%;margin-bottom:24px}"
+        "td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left;vertical-align:top;font-size:14px}"
+        "tr.alerta{background:#ffe8e8}button{padding:4px 8px;margin:2px 0}"
+        ".cards{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0 24px}.card{border:1px solid #ddd;border-radius:10px;padding:12px 16px;min-width:170px}</style>"
+        f"<h2>Rory — panel del equipo</h2><p><a href='?token={t}'>Actualizar</a></p>"
+        f"<div class='cards'>{tarjetas}</div>"
+        f"<h3>Esperando a una persona ({len(esp)})</h3>"
+        "<table><tr><th>Tipo</th><th>Cliente</th><th>Último mensaje</th><th>Espera</th><th></th></tr>" + filas_esp + "</table>"
+        f"<h3>Lo que Rory no supo contestar hoy</h3><ul>{lista_vacios}</ul>"
+        "<h3>Todas las conversaciones</h3>"
+        "<table><tr><th>Estado</th><th>Cliente</th><th>Último mensaje del cliente</th><th>Hora</th><th></th></tr>" + filas + "</table>"
+    )
+
+
+@app.get("/panel/chat", response_class=HTMLResponse)
+async def panel_chat(token: str = "", tel: str = ""):
+    """La conversacion completa de un cliente."""
+    if not _panel_autorizado(token):
+        raise HTTPException(status_code=404)
+    from urllib.parse import quote
+    msgs = await transcripcion(tel)
+    burbujas = ""
+    for x in msgs:
+        quien = "Cliente" if x["role"] == "user" else "Rory"
+        clase = "cli" if x["role"] == "user" else "rory"
+        hora = x["hora"].astimezone(_zona_mx()).strftime("%d/%m %H:%M")
+        burbujas += (f'<div class="b {clase}"><small>{quien} · {hora}</small><br>'
+                     f'{html.escape(x["texto"]).replace(chr(10), "<br>")}</div>')
+    burbujas = burbujas or "<p>Todavía no hay mensajes guardados de esta conversación.</p>"
+    return HTMLResponse(
+        "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Rory — chat</title>"
+        "<style>body{font-family:system-ui;margin:16px;max-width:720px}.b{padding:8px 12px;border-radius:12px;margin:8px 0;max-width:85%}"
+        ".cli{background:#f1f1f1}.rory{background:#d9f2d9;margin-left:auto}small{color:#666}</style>"
+        f"<p><a href='/panel?token={quote(token)}'>← Volver al panel</a></p><h3>{html.escape(tel)}</h3>" + burbujas
     )
 
 
