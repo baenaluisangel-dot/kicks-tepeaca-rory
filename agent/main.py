@@ -26,6 +26,7 @@ from agent.catalogo import (
     ARCHIVO_CATALOGO_PDF,
     ARCHIVO_PAQUETES_PDF,
     PAQUETES_PUEBLA,
+    ZONAS_PUEBLA,
     url_paquetes_pdf,
     obtener_producto,
     pie_de_foto,
@@ -41,7 +42,14 @@ from agent.memory import (
     listar_atencion,
     marcar_necesita_persona,
     necesita_persona,
+    borrar_ruta,
+    cambiar_estado_entrega,
+    crear_entrega,
+    crear_ruta,
+    dias_disponibles,
     listar_avisos,
+    listar_entregas,
+    listar_rutas,
     metricas,
     registrar_aviso,
     registrar_mensaje_cliente,
@@ -520,6 +528,36 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 )
                 return "OK: el equipo quedo avisado. Dile al cliente que un companero le contesta por este chat."
 
+            async def ver_dias_entrega(zona: str) -> str:
+                """La usa Claude: dias de entrega abiertos para la zona del cliente."""
+                dias = await dias_disponibles(zona, _fecha_hoy_iso())
+                if not dias:
+                    return ("No hay dias de entrega abiertos para esa zona por ahora. Usa avisar_equipo "
+                            "con tipo 'pedido' y dile al cliente que el equipo le confirma el dia.")
+                lineas = [
+                    f"- {d['fecha']} ({_fecha_bonita(d['fecha'])}), horario {d['horario'] or 'por confirmar'}, "
+                    f"quedan {d['quedan']} lugares"
+                    for d in dias[:5]
+                ]
+                return "Dias disponibles en " + zona + ":\n" + "\n".join(lineas)
+
+            async def agendar_entrega(fecha: str, zona: str, nombre: str, pedido: str) -> str:
+                """La usa Claude: agenda la entrega (por confirmar) y avisa al equipo."""
+                ok, detalle = await crear_entrega(msg.telefono, fecha, zona, nombre, pedido, _fecha_hoy_iso())
+                if not ok:
+                    return f"ERROR: {detalle} Vuelve a llamar ver_dias_entrega y ofrece otro dia."
+                await marcar_necesita_persona(msg.telefono, True, f"Entrega {fecha} {zona}: {pedido}")
+                await registrar_aviso(msg.telefono, "pedido", f"Entrega agendada {fecha} en {zona} — {nombre}: {pedido}")
+                logger.info(f"{msg.telefono}: entrega agendada {fecha} {zona}")
+                await avisar_por_telegram(
+                    f"🟢 ENTREGA AGENDADA (por confirmar existencia)\n"
+                    f"{_fecha_bonita(fecha)} · {zona} · {detalle or ''}\n"
+                    f"Cliente: {nombre} — {enlace_cliente(msg.telefono, plataforma)}\nPedido: {pedido}"
+                )
+                return (f"OK: agendada para {_fecha_bonita(fecha)} en {zona}"
+                        f"{', horario ' + detalle if detalle else ''}. Dile al cliente que quedo agendada "
+                        "y que un companero le confirma la existencia por este chat.")
+
             respuesta, es_respuesta_real = await generar_respuesta(
                 texto_para_ia,
                 historial,
@@ -529,6 +567,8 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 modo,
                 avisar_equipo,
                 enviar_fotos_paquete if es_puebla else None,
+                ver_dias_entrega if es_puebla else None,
+                agendar_entrega if es_puebla else None,
             )
 
             enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto)
@@ -589,6 +629,21 @@ def _inicio_de_hoy():
     return datetime.now(z).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+DIAS_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+            "septiembre", "octubre", "noviembre", "diciembre"]
+
+
+def _fecha_hoy_iso() -> str:
+    return _inicio_de_hoy().strftime("%Y-%m-%d")
+
+
+def _fecha_bonita(iso: str) -> str:
+    from datetime import date
+    d = date.fromisoformat(iso)
+    return f"{DIAS_ES[d.weekday()]} {d.day} de {MESES_ES[d.month - 1]}"
+
+
 NOMBRES_TIPO = {
     "pedido": "🟢 Pedido listo", "duda_producto": "🟠 Duda de producto",
     "fuera_de_catalogo": "🟡 Pide algo que no tenemos", "queja_o_problema": "🔴 Queja o problema",
@@ -612,6 +667,13 @@ async def _resumen_texto() -> str:
     lineas.append(f"Esperando a una persona ahora: {len(esperando)}")
     for c in esperando[:10]:
         lineas.append(f"• {enlace_cliente(c['telefono'], c['plataforma'])} — {c['motivo'][:90]}")
+    from datetime import timedelta
+    manana = (_inicio_de_hoy() + timedelta(days=1)).strftime("%Y-%m-%d")
+    ent = [e for e in await listar_entregas(manana) if e["fecha"] == manana]
+    if ent:
+        lineas.append(f"🚚 Entregas de mañana ({_fecha_bonita(manana)}): {len(ent)}")
+        for e in ent[:15]:
+            lineas.append(f"• {e['nombre']} — {e['zona']} — {e['pedido'][:70]} ({'confirmada' if e['estado'] == 'confirmada' else 'por confirmar'})")
     return "\n".join(lineas)
 
 
@@ -698,6 +760,41 @@ async def panel(token: str = ""):
         f'<li>{NOMBRES_TIPO.get(a["tipo"], "")} — {html.escape(a["motivo"])}</li>' for a in vacios[:30]
     ) or "<li>Nada por ahora</li>"
 
+    # calendario de entregas
+    hoy_iso = _fecha_hoy_iso()
+    rutas = await listar_rutas(hoy_iso)
+    entregas = await listar_entregas(hoy_iso)
+    por_fecha: dict[str, list] = {}
+    for e in entregas:
+        por_fecha.setdefault(e["fecha"], []).append(e)
+    nombres_cli = {c["telefono"]: c for c in todas}
+    filas_rutas = ""
+    for r in rutas:
+        det = ""
+        for e in por_fecha.get(r["fecha"], []):
+            col = "✅" if e["estado"] == "confirmada" else "⏳"
+            cli = nombres_cli.get(e["telefono"], {"telefono": e["telefono"], "plataforma": "whatsapp"})
+            det += (f'<div>{col} {html.escape(e["nombre"])} · {html.escape(e["zona"])} · {html.escape(e["pedido"])} · {_cliente_html(cli)} '
+                    f'{ver(e["telefono"])} '
+                    f'<form method="post" action="/panel/entrega" style="display:inline"><input type="hidden" name="token" value="{t}">'
+                    f'<input type="hidden" name="id" value="{e["id"]}">'
+                    f'<button name="estado" value="confirmada">Confirmar</button><button name="estado" value="cancelada">Cancelar</button></form></div>')
+        filas_rutas += (
+            f'<tr><td><b>{_fecha_bonita(r["fecha"])}</b><br><small>{r["fecha"]}</small></td>'
+            f'<td>{html.escape(", ".join(r["zonas"]))}</td><td>{html.escape(r["horario"])}</td>'
+            f'<td>{r["ocupados"]}/{r["cupo"]}</td><td>{det or "—"}</td>'
+            f'<td><form method="post" action="/panel/ruta/borrar"><input type="hidden" name="token" value="{t}">'
+            f'<input type="hidden" name="id" value="{r["id"]}"><button>Quitar día</button></form></td></tr>'
+        )
+    filas_rutas = filas_rutas or '<tr><td colspan="6">No hay días abiertos. Agrega uno abajo para que Rory pueda agendar.</td></tr>'
+    checks = "".join(f'<label><input type="checkbox" name="zonas" value="{z}"> {z}</label> ' for z in ZONAS_PUEBLA)
+    form_ruta = (
+        f'<form method="post" action="/panel/ruta"><input type="hidden" name="token" value="{t}">'
+        f'<p>Fecha: <input type="date" name="fecha" required> &nbsp; Horario: <input name="horario" placeholder="12:00 a 18:00" size="14"> '
+        f'&nbsp; Entregas que caben: <input type="number" name="cupo" value="6" min="1" style="width:60px"></p>'
+        f'<p>Zonas que cubres ese día: {checks}</p><button>Abrir día de entregas</button></form>'
+    )
+
     # todas
     filas = ""
     for c in todas[:150]:
@@ -717,6 +814,9 @@ async def panel(token: str = ""):
         f"<div class='cards'>{tarjetas}</div>"
         f"<h3>Esperando a una persona ({len(esp)})</h3>"
         "<table><tr><th>Tipo</th><th>Cliente</th><th>Último mensaje</th><th>Espera</th><th></th></tr>" + filas_esp + "</table>"
+        "<h3>Calendario de entregas</h3>"
+        "<table><tr><th>Día</th><th>Zonas</th><th>Horario</th><th>Agendadas</th><th>Entregas</th><th></th></tr>" + filas_rutas + "</table>"
+        + form_ruta +
         f"<h3>Lo que Rory no supo contestar hoy</h3><ul>{lista_vacios}</ul>"
         "<h3>Todas las conversaciones</h3>"
         "<table><tr><th>Estado</th><th>Cliente</th><th>Último mensaje del cliente</th><th>Hora</th><th></th></tr>" + filas + "</table>"
@@ -760,4 +860,48 @@ async def panel_accion(request: Request):
     elif accion == "atendido":
         await marcar_necesita_persona(tel, False)
     from fastapi.responses import RedirectResponse
+    return RedirectResponse(f"/panel?token={form.get('token')}", status_code=303)
+
+
+@app.post("/panel/ruta")
+async def panel_ruta(request: Request):
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    if not _panel_autorizado(str(form.get("token", ""))):
+        raise HTTPException(status_code=404)
+    zonas = [z for z in form.getlist("zonas") if z in ZONAS_PUEBLA]
+    fecha = str(form.get("fecha", ""))
+    if fecha and zonas:
+        try:
+            await crear_ruta(fecha, zonas, str(form.get("horario", "")), int(form.get("cupo") or 6))
+        except ValueError:
+            pass
+    return RedirectResponse(f"/panel?token={form.get('token')}", status_code=303)
+
+
+@app.post("/panel/ruta/borrar")
+async def panel_ruta_borrar(request: Request):
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    if not _panel_autorizado(str(form.get("token", ""))):
+        raise HTTPException(status_code=404)
+    try:
+        await borrar_ruta(int(form.get("id") or 0))
+    except ValueError:
+        pass
+    return RedirectResponse(f"/panel?token={form.get('token')}", status_code=303)
+
+
+@app.post("/panel/entrega")
+async def panel_entrega(request: Request):
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    if not _panel_autorizado(str(form.get("token", ""))):
+        raise HTTPException(status_code=404)
+    estado = str(form.get("estado", ""))
+    if estado in ("confirmada", "cancelada"):
+        try:
+            await cambiar_estado_entrega(int(form.get("id") or 0), estado)
+        except ValueError:
+            pass
     return RedirectResponse(f"/panel?token={form.get('token')}", status_code=303)

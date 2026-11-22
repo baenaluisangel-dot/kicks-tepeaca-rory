@@ -342,6 +342,119 @@ async def metricas(desde: datetime) -> dict:
     return {"por_canal": por_canal, "avisos": avisos, "avisos_por_tipo": por_tipo}
 
 
+class Ruta(Base):
+    """Un dia de entregas que el equipo abre: que zonas cubre, horario y cuantas caben."""
+
+    __tablename__ = "rutas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fecha: Mapped[str] = mapped_column(String(10), index=True)   # YYYY-MM-DD
+    zonas: Mapped[str] = mapped_column(Text, default="")          # separadas por coma
+    horario: Mapped[str] = mapped_column(String(60), default="")
+    cupo: Mapped[int] = mapped_column(Integer, default=5)
+
+
+class Entrega(Base):
+    """Una entrega agendada por Rory (por confirmar hasta que el equipo valide existencia)."""
+
+    __tablename__ = "entregas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telefono: Mapped[str] = mapped_column(String(50), index=True)
+    fecha: Mapped[str] = mapped_column(String(10), index=True)
+    zona: Mapped[str] = mapped_column(String(40), default="")
+    nombre: Mapped[str] = mapped_column(String(100), default="")
+    pedido: Mapped[str] = mapped_column(Text, default="")
+    estado: Mapped[str] = mapped_column(String(20), default="por_confirmar")  # por_confirmar | confirmada | cancelada
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
+
+
+def _sin_acentos(t: str) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", t) if unicodedata.category(c) != "Mn").lower().strip()
+
+
+async def crear_ruta(fecha: str, zonas: list[str], horario: str, cupo: int):
+    async with async_session() as session:
+        session.add(Ruta(fecha=fecha, zonas=",".join(zonas), horario=horario[:60], cupo=max(1, int(cupo))))
+        await session.commit()
+
+
+async def borrar_ruta(ruta_id: int):
+    async with async_session() as session:
+        await session.execute(delete(Ruta).where(Ruta.id == ruta_id))
+        await session.commit()
+
+
+async def _ocupados(session, fecha: str) -> int:
+    n = await session.execute(
+        select(func.count()).select_from(Entrega).where(Entrega.fecha == fecha, Entrega.estado != "cancelada")
+    )
+    return int(n.scalar() or 0)
+
+
+async def listar_rutas(desde_fecha: str) -> list[dict]:
+    async with async_session() as session:
+        rutas = (await session.execute(
+            select(Ruta).where(Ruta.fecha >= desde_fecha).order_by(Ruta.fecha, Ruta.id)
+        )).scalars().all()
+        salida = []
+        for r in rutas:
+            salida.append({
+                "id": r.id, "fecha": r.fecha, "zonas": [z for z in r.zonas.split(",") if z],
+                "horario": r.horario, "cupo": r.cupo, "ocupados": await _ocupados(session, r.fecha),
+            })
+    return salida
+
+
+async def dias_disponibles(zona: str, desde_fecha: str) -> list[dict]:
+    """Rutas futuras que cubren la zona y todavia tienen lugar."""
+    z = _sin_acentos(zona)
+    return [
+        {"fecha": r["fecha"], "horario": r["horario"], "quedan": r["cupo"] - r["ocupados"]}
+        for r in await listar_rutas(desde_fecha)
+        if any(_sin_acentos(x) == z for x in r["zonas"]) and r["cupo"] > r["ocupados"]
+    ]
+
+
+async def crear_entrega(telefono: str, fecha: str, zona: str, nombre: str, pedido: str, desde_fecha: str) -> tuple[bool, str]:
+    """Agenda la entrega si ese dia cubre la zona y hay lugar. Devuelve (ok, mensaje)."""
+    z = _sin_acentos(zona)
+    async with async_session() as session:
+        rutas = (await session.execute(select(Ruta).where(Ruta.fecha == fecha))).scalars().all()
+        ruta = next((r for r in rutas if fecha >= desde_fecha and any(_sin_acentos(x) == z for x in r.zonas.split(","))), None)
+        if not ruta:
+            return False, "Ese dia no hay entregas para esa zona."
+        if await _ocupados(session, fecha) >= ruta.cupo:
+            return False, "Ese dia ya se lleno."
+        ya = (await session.execute(select(Entrega).where(
+            Entrega.telefono == telefono, Entrega.fecha == fecha, Entrega.estado != "cancelada"
+        ))).scalars().first()
+        if ya:
+            return True, "Ya estaba agendada para ese dia."
+        session.add(Entrega(telefono=telefono, fecha=fecha, zona=zona[:40], nombre=nombre[:100],
+                            pedido=pedido[:600], estado="por_confirmar", creado_en=ahora()))
+        await session.commit()
+    return True, ruta.horario
+
+
+async def listar_entregas(desde_fecha: str) -> list[dict]:
+    async with async_session() as session:
+        filas = (await session.execute(
+            select(Entrega).where(Entrega.fecha >= desde_fecha, Entrega.estado != "cancelada").order_by(Entrega.fecha, Entrega.id)
+        )).scalars().all()
+    return [{"id": f.id, "telefono": f.telefono, "fecha": f.fecha, "zona": f.zona, "nombre": f.nombre,
+             "pedido": f.pedido, "estado": f.estado} for f in filas]
+
+
+async def cambiar_estado_entrega(entrega_id: int, estado: str):
+    async with async_session() as session:
+        fila = await session.get(Entrega, entrega_id)
+        if fila:
+            fila.estado = estado
+            await session.commit()
+
+
 async def inicializar_db():
     """Crea las tablas si no existen."""
     async with engine.begin() as conn:

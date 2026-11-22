@@ -13,7 +13,7 @@ import yaml
 from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 
-from agent.catalogo import PAQUETES_PUEBLA, ids_validos
+from agent.catalogo import PAQUETES_PUEBLA, ZONAS_PUEBLA, ids_validos
 
 load_dotenv()
 logger = logging.getLogger("agentkit")
@@ -96,6 +96,39 @@ HERRAMIENTA_FOTOS_PAQUETE = {
             "paquete": {"type": "string", "enum": list(PAQUETES_PUEBLA.keys())},
         },
         "required": ["paquete"],
+    },
+}
+
+HERRAMIENTA_VER_DIAS = {
+    "name": "ver_dias_entrega",
+    "description": (
+        "Solo Puebla. Consulta los proximos dias de entrega disponibles para una zona (con "
+        "horario y lugares que quedan). Usala cuando el cliente ya sabe que quiere y le "
+        "ofreciste compartirle los dias. NUNCA ofrezcas un dia que no salga aqui."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"zona": {"type": "string", "enum": ZONAS_PUEBLA}},
+        "required": ["zona"],
+    },
+}
+
+HERRAMIENTA_AGENDAR = {
+    "name": "agendar_entrega",
+    "description": (
+        "Solo Puebla. Agenda la entrega del cliente en un dia que salio en ver_dias_entrega. "
+        "Quedara por confirmar: el equipo valida la existencia. Necesitas el nombre del "
+        "cliente, la zona, la fecha (YYYY-MM-DD, tal cual salio) y el pedido (juguetes o paquete y total)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "fecha": {"type": "string", "description": "YYYY-MM-DD, tal cual salio en ver_dias_entrega."},
+            "zona": {"type": "string", "enum": ZONAS_PUEBLA},
+            "nombre": {"type": "string"},
+            "pedido": {"type": "string", "description": "Que llevara y el total, ej: 'Dúo Woody y Buzz, $1,250'."},
+        },
+        "required": ["fecha", "zona", "nombre", "pedido"],
     },
 }
 
@@ -195,6 +228,8 @@ async def generar_respuesta(
     modo: str = "tepeaca",
     avisar_equipo=None,
     enviar_fotos_paquete=None,
+    ver_dias=None,
+    agendar=None,
 ) -> tuple[str, bool]:
     """
     Genera una respuesta con Claude.
@@ -255,6 +290,10 @@ async def generar_respuesta(
             herramientas.append(HERRAMIENTA_CATALOGO)
         if enviar_fotos_paquete:
             herramientas.append(HERRAMIENTA_FOTOS_PAQUETE)
+        if ver_dias:
+            herramientas.append(HERRAMIENTA_VER_DIAS)
+        if agendar:
+            herramientas.append(HERRAMIENTA_AGENDAR)
         if avisar_equipo:
             herramientas.append(HERRAMIENTA_EQUIPO)
         if herramientas:
@@ -311,6 +350,13 @@ async def generar_respuesta(
                 resultado = await enviar_fotos_paquete((bloque.input or {}).get("paquete", ""))
                 if resultado.startswith("OK"):
                     fotos_enviadas += 1
+            elif bloque.name == "ver_dias_entrega" and ver_dias:
+                resultado = await ver_dias((bloque.input or {}).get("zona", ""))
+            elif bloque.name == "agendar_entrega" and agendar:
+                d = bloque.input or {}
+                resultado = await agendar(
+                    d.get("fecha", ""), d.get("zona", ""), d.get("nombre", ""), d.get("pedido", "")
+                )
             elif bloque.name == "avisar_equipo" and avisar_equipo:
                 resultado = await avisar_equipo(
                     (bloque.input or {}).get("motivo", ""), (bloque.input or {}).get("tipo", "otro")

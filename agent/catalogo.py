@@ -109,3 +109,6 @@ PAQUETES_PUEBLA: dict[str, list[str]] = {
         "toy-story-tiro-al-blanco-peluche",
     ],
 }
+
+
+ZONAS_PUEBLA = ["Angelópolis", "Valsequillo", "Peri Plaza", "CAPU", "CU", "Centro", "Amozoc"]
