@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from agent.brain import generar_respuesta
-from agent.catalogo import ZONAS_PUEBLA, obtener_producto
+from agent.catalogo import VIDEOS_TOY_STORY, ZONAS_PUEBLA, obtener_producto
 from agent.memory import (
     borrar_ejemplo,
     borrar_ruta,
@@ -582,6 +582,12 @@ async def panel_practica_mensaje(request: Request):
         acciones.append(f"📷 Mandaría una foto de cada juguete del paquete {paquete}")
         return f"OK: fotos del paquete {paquete} enviadas."
 
+    async def video(nombre: str) -> str:
+        if nombre not in VIDEOS_TOY_STORY:
+            return f"ERROR: no hay video '{nombre}'."
+        acciones.append(f"🎬 Mandaría el video de {nombre}")
+        return f"OK: video de {nombre} enviado."
+
     async def catalogo() -> str:
         acciones.append("📎 Mandaría el PDF del catálogo")
         return "OK: catalogo en PDF enviado."
@@ -612,6 +618,7 @@ async def panel_practica_mensaje(request: Request):
         texto_ia, historial, foto, catalogo, "whatsapp" if es_puebla else "instagram", modo, avisar,
         fotos_paquete if es_puebla else None, ver_dias if es_puebla else None, agendar if es_puebla else None,
         (await listar_ejemplos(modo, 15))[::-1],
+        video if es_puebla else None,
     )
     return {"respuesta": respuesta, "acciones": acciones}
 

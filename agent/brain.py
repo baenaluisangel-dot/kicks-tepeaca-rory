@@ -13,7 +13,7 @@ import yaml
 from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 
-from agent.catalogo import PAQUETES_PUEBLA, ZONAS_PUEBLA, ids_validos
+from agent.catalogo import PAQUETES_PUEBLA, VIDEOS_TOY_STORY, ZONAS_PUEBLA, ids_validos
 
 load_dotenv()
 logger = logging.getLogger("agentkit")
@@ -96,6 +96,23 @@ HERRAMIENTA_FOTOS_PAQUETE = {
             "paquete": {"type": "string", "enum": list(PAQUETES_PUEBLA.keys())},
         },
         "required": ["paquete"],
+    },
+}
+
+HERRAMIENTA_VIDEO = {
+    "name": "enviar_video",
+    "description": (
+        "Solo Puebla. Envia al cliente por WhatsApp un video corto del juguete (para verlo a "
+        "detalle). Usalo cuando pidan un video o quieran ver el juguete 'en accion'. Para un "
+        "paquete manda los videos de sus juguetes (maximo 3 por respuesta). No mandes videos si "
+        "no los piden. Videos disponibles: "
+        + "; ".join(f"{k} = {v[1]}" for k, v in VIDEOS_TOY_STORY.items())
+        + ". NO hay video de Rex ni de Buzz chico ni del carro RC grande: avisa al equipo."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"video": {"type": "string", "enum": list(VIDEOS_TOY_STORY.keys())}},
+        "required": ["video"],
     },
 }
 
@@ -231,6 +248,7 @@ async def generar_respuesta(
     ver_dias=None,
     agendar=None,
     ejemplos=None,
+    enviar_video=None,
 ) -> tuple[str, bool]:
     """
     Genera una respuesta con Claude.
@@ -299,6 +317,8 @@ async def generar_respuesta(
             herramientas.append(HERRAMIENTA_CATALOGO)
         if enviar_fotos_paquete:
             herramientas.append(HERRAMIENTA_FOTOS_PAQUETE)
+        if enviar_video:
+            herramientas.append(HERRAMIENTA_VIDEO)
         if ver_dias:
             herramientas.append(HERRAMIENTA_VER_DIAS)
         if agendar:
@@ -357,6 +377,10 @@ async def generar_respuesta(
                     fotos_enviadas += 1
             elif bloque.name == "enviar_fotos_paquete" and enviar_fotos_paquete:
                 resultado = await enviar_fotos_paquete((bloque.input or {}).get("paquete", ""))
+                if resultado.startswith("OK"):
+                    fotos_enviadas += 1
+            elif bloque.name == "enviar_video" and enviar_video:
+                resultado = await enviar_video((bloque.input or {}).get("video", ""))
                 if resultado.startswith("OK"):
                     fotos_enviadas += 1
             elif bloque.name == "ver_dias_entrega" and ver_dias:

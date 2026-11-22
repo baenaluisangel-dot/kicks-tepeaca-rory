@@ -394,6 +394,36 @@ class ProveedorZernio(ProveedorWhatsApp):
         logger.error(f"Zernio rechazo la imagen [{r.status_code}]: {r.text[:500]}")
         return False
 
+    async def enviar_video(
+        self, telefono: str, url: str, texto: str, contexto: dict | None = None
+    ) -> bool:
+        """Manda un video MP4 (H.264/AAC) con texto. La URL debe ser publica."""
+        contexto = contexto or {}
+        conversation_id = contexto.get("conversation_id")
+        account_id = contexto.get("account_id") or self.account_id
+        api_key = self._api_key(contexto)
+        if not api_key or not conversation_id or not account_id:
+            logger.error("No se puede enviar el video: faltan API key, conversation_id o account_id")
+            return False
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        evento_id = contexto.get("evento_id")
+        if evento_id:
+            headers["Idempotency-Key"] = f"agentkit-{evento_id}-video-{url.rsplit('/', 1)[-1]}"
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as cliente:
+                r = await cliente.post(
+                    f"{self.base_url}/inbox/conversations/{conversation_id}/messages",
+                    json={"accountId": account_id, "message": texto, "attachmentUrl": url, "attachmentType": "video"},
+                    headers=headers,
+                )
+        except httpx.HTTPError as e:
+            logger.error(f"Error de red mandando video a Zernio: {e}")
+            return False
+        if r.status_code == 200:
+            return True
+        logger.error(f"Zernio rechazo el video [{r.status_code}]: {r.text[:500]}")
+        return False
+
     async def enviar_documento(
         self, telefono: str, url: str, nombre_archivo: str, texto: str, contexto: dict | None = None
     ) -> bool:

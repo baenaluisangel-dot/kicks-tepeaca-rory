@@ -112,3 +112,23 @@ PAQUETES_PUEBLA: dict[str, list[str]] = {
 
 
 ZONAS_PUEBLA = ["Angelópolis", "Valsequillo", "Peri Plaza", "CAPU", "CU", "Centro", "Amozoc"]
+
+
+# Videos de los juguetes Toy Story (static/videos, MP4 H.264). La clave es lo que ve Claude.
+VIDEOS_TOY_STORY: dict[str, tuple[str, str]] = {
+    "Woody": ("woody.mp4", "Woody (Sheriff Woody que habla)"),
+    "Jessie": ("jessie.mp4", "Jessie con sonido"),
+    "Buzz Lightyear con alas": ("buzz-lightyear.mp4", "Buzz Lightyear con alas (habla, luces, brilla en la oscuridad)"),
+    "Buzz solo": ("buzz-solo.mp4", "Buzz Lightyear (individual)"),
+    "Alien": ("alien.mp4", "Alien (figura de acción)"),
+    "Tiro al Blanco": ("tiro-al-blanco.mp4", "Tiro al Blanco (peluche)"),
+    "Carro a control remoto": ("carro-control-remoto.mp4", "Carro RC de Toy Story"),
+    "Woody y Buzz": ("woody-y-buzz.mp4", "Dúo Woody y Buzz"),
+    "Buzz y Alien": ("buzz-y-alien.mp4", "Dúo Buzz y Alien"),
+    "Todos los juguetes": ("todos-los-juguetes.mp4", "Todos los juguetes Toy Story juntos"),
+}
+
+
+def url_video(archivo: str) -> str | None:
+    base = url_base()
+    return f"{base}/videos/{archivo}" if base else None

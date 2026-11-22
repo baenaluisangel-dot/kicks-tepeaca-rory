@@ -54,6 +54,12 @@ class ProveedorWhatsApp(ABC):
         """Envia un documento (PDF, etc.). Por defecto no esta soportado."""
         return False
 
+    async def enviar_video(
+        self, telefono: str, url: str, texto: str, contexto: dict | None = None
+    ) -> bool:
+        """Envia un video (MP4) con pie de texto. Por defecto no esta soportado."""
+        return False
+
     async def verificar_firma(self, request: Request) -> bool:
         """
         Confirma que el webhook viene de verdad del proveedor.

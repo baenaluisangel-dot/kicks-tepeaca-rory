@@ -26,7 +26,9 @@ from agent.catalogo import (
     ARCHIVO_CATALOGO_PDF,
     ARCHIVO_PAQUETES_PDF,
     PAQUETES_PUEBLA,
+    VIDEOS_TOY_STORY,
     ZONAS_PUEBLA,
+    url_video,
     url_paquetes_pdf,
     obtener_producto,
     pie_de_foto,
@@ -141,6 +143,8 @@ app.include_router(panel_router)
 app.mount("/fotos", StaticFiles(directory="static/fotos"), name="fotos")
 # Catalogo de juguetes en PDF (se manda como documento cuando lo piden).
 app.mount("/catalogo", StaticFiles(directory="static/catalogo"), name="catalogo")
+# Videos cortos de los juguetes (MP4).
+app.mount("/videos", StaticFiles(directory="static/videos"), name="videos")
 
 
 @app.get("/")
@@ -468,6 +472,27 @@ async def procesar_mensaje(msg: MensajeEntrante):
                     return f"OK: {enviadas} foto(s) del paquete {paquete} enviada(s)."
                 return "ERROR: no se pudieron enviar las fotos. Ofrece que el equipo se las manda."
 
+            contador_videos = {"n": 0}
+
+            async def enviar_video(video: str) -> str:
+                """La usa Claude en Puebla: manda un video corto del juguete."""
+                info = VIDEOS_TOY_STORY.get(video)
+                if not info:
+                    return f"ERROR: no hay video '{video}'. Avisa al equipo con avisar_equipo (duda_producto)."
+                if contador_videos["n"] >= 3:
+                    return "ERROR: ya se mandaron 3 videos en este mensaje. No mandes mas."
+                url = url_video(info[0])
+                if not url:
+                    return "ERROR: no hay URL publica configurada para los videos."
+                ok = await proveedor.enviar_video(msg.telefono, url, "", msg.contexto)
+                if not ok:  # ultimo recurso: como archivo
+                    ok = await proveedor.enviar_documento(msg.telefono, url, info[0], "", msg.contexto)
+                if ok:
+                    contador_videos["n"] += 1
+                    fotos_mandadas.append(f"video de {video}")
+                    return f"OK: video de {video} enviado."
+                return "ERROR: no se pudo enviar el video. Ofrece que el equipo se lo manda."
+
             async def enviar_catalogo() -> str:
                 """La usa Claude (herramienta enviar_catalogo) para mandar el PDF del catalogo."""
                 url = url_paquetes_pdf() if es_puebla else url_catalogo_pdf()
@@ -575,6 +600,7 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 ver_dias_entrega if es_puebla else None,
                 agendar_entrega if es_puebla else None,
                 (await listar_ejemplos(modo, 15))[::-1],
+                enviar_video if es_puebla else None,
             )
 
             enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto)
