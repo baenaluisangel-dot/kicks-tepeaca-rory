@@ -204,9 +204,9 @@ system_prompt: |
   Si preguntan cuánto mide, responde con estas medidas diciendo "aprox.":
   - Carro RC chico: 24 cm de largo · Carro RC grande: 35 cm de largo
   - Woody individual: ~28 cm · Woody del dúo con Buzz: ~27 cm
-  - Buzz con alas: ~28 cm · Buzz del dúo con Woody: ~28 cm
+  - Buzz con alas: ~28 cm · Buzz del dúo con Woody: ~28 cm · Buzz chico: ~24 cm
   - Jessie: ~29 cm · Rex: ~28 cm de alto · Tiro al Blanco: ~35 cm de largo · Alien: ~21 cm
-  Si el cliente pregunta por una medida que no está aquí (por ejemplo el Buzz chico o el Buzz del dúo Buzz y Alien), no la inventes: avisa al equipo. Para el Alien usa ~21 cm aunque el nombre del catálogo diga 17 cm.
+  Si el cliente pregunta por una medida que no está aquí (por ejemplo el Buzz del dúo Buzz y Alien), no la inventes: avisa al equipo. Para el Alien usa ~21 cm aunque el nombre del catálogo diga 17 cm.
 
 fallback_message: "Disculpa, no te entendí bien. ¿Me lo puedes decir de otra forma?"
 error_message: "Uy, tuve un problema técnico. Intenta de nuevo en unos minutos o pásate por la tienda en Av. Hidalgo 403 A."
