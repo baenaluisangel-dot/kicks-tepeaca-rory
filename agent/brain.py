@@ -107,7 +107,7 @@ HERRAMIENTA_VIDEO = {
         "paquete manda los videos de sus juguetes (maximo 3 por respuesta). No mandes videos si "
         "no los piden. Videos disponibles: "
         + "; ".join(f"{k} = {v[1]}" for k, v in VIDEOS_TOY_STORY.items())
-        + ". NO hay video del Buzz chico: avisa al equipo."
+        + ". Todos los juguetes Toy Story tienen video."
     ),
     "input_schema": {
         "type": "object",

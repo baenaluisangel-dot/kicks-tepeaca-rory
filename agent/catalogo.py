@@ -120,6 +120,7 @@ VIDEOS_TOY_STORY: dict[str, tuple[str, str]] = {
     "Jessie": ("jessie.mp4", "Jessie con sonido"),
     "Buzz Lightyear con alas": ("buzz-lightyear.mp4", "Buzz Lightyear con alas (habla, luces, brilla en la oscuridad)"),
     "Buzz solo": ("buzz-solo.mp4", "Buzz Lightyear (individual)"),
+    "Buzz chico": ("buzz-chico.mp4", "Buzz chico (el video incluye una comparativa entre el Buzz grande y el Buzz chico)"),
     "Alien": ("alien.mp4", "Alien (figura de acción)"),
     "Rex": ("rex.mp4", "Rex que habla"),
     "Tiro al Blanco": ("tiro-al-blanco.mp4", "Tiro al Blanco (peluche)"),
