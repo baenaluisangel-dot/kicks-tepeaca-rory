@@ -116,6 +116,31 @@ HERRAMIENTA_VIDEO = {
     },
 }
 
+HERRAMIENTA_LISTA_ZONAS = {
+    "name": "enviar_lista_zonas",
+    "description": (
+        "Solo Puebla (WhatsApp). Manda al cliente una LISTA para que toque su zona de entrega. "
+        "Usala cuando ya sepa que quiere comprar y todavia no sepas su zona (en vez de pedirsela "
+        "por texto). La lista ya trae la pregunta: despues escribe una frase muy corta o nada."
+    ),
+    "input_schema": {"type": "object", "properties": {}},
+}
+
+HERRAMIENTA_LISTA_DIAS = {
+    "name": "enviar_lista_dias",
+    "description": (
+        "Solo Puebla (WhatsApp). Manda al cliente una LISTA con los dias de entrega abiertos para "
+        "su zona, para que toque el que le acomode. Usala cuando ya sepas su zona y quiera agendar. "
+        "La lista ya trae la pregunta: despues escribe una frase muy corta o nada. Cuando el cliente "
+        "elija, te llegara su eleccion como mensaje; entonces usa agendar_entrega."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"zona": {"type": "string", "enum": ZONAS_PUEBLA}},
+        "required": ["zona"],
+    },
+}
+
 HERRAMIENTA_VER_DIAS = {
     "name": "ver_dias_entrega",
     "description": (
@@ -249,6 +274,8 @@ async def generar_respuesta(
     agendar=None,
     ejemplos=None,
     enviar_video=None,
+    lista_zonas=None,
+    lista_dias=None,
 ) -> tuple[str, bool]:
     """
     Genera una respuesta con Claude.
@@ -319,6 +346,10 @@ async def generar_respuesta(
             herramientas.append(HERRAMIENTA_FOTOS_PAQUETE)
         if enviar_video:
             herramientas.append(HERRAMIENTA_VIDEO)
+        if lista_zonas:
+            herramientas.append(HERRAMIENTA_LISTA_ZONAS)
+        if lista_dias:
+            herramientas.append(HERRAMIENTA_LISTA_DIAS)
         if ver_dias:
             herramientas.append(HERRAMIENTA_VER_DIAS)
         if agendar:
@@ -355,6 +386,7 @@ async def generar_respuesta(
     # Ciclo de herramientas: si Claude pide mandar una foto, la mandamos y le contamos
     # el resultado para que redacte la respuesta final.
     fotos_enviadas = 0
+    listas_programadas = 0
     for _ in range(MAX_VUELTAS_HERRAMIENTAS):
         if getattr(respuesta, "stop_reason", None) != "tool_use":
             break
@@ -383,6 +415,14 @@ async def generar_respuesta(
                 resultado = await enviar_video((bloque.input or {}).get("video", ""))
                 if resultado.startswith("OK"):
                     fotos_enviadas += 1
+            elif bloque.name == "enviar_lista_zonas" and lista_zonas:
+                resultado = await lista_zonas()
+                if resultado.startswith("OK"):
+                    listas_programadas += 1
+            elif bloque.name == "enviar_lista_dias" and lista_dias:
+                resultado = await lista_dias((bloque.input or {}).get("zona", ""))
+                if resultado.startswith("OK"):
+                    listas_programadas += 1
             elif bloque.name == "ver_dias_entrega" and ver_dias:
                 resultado = await ver_dias((bloque.input or {}).get("zona", ""))
             elif bloque.name == "agendar_entrega" and agendar:
@@ -414,6 +454,8 @@ async def generar_respuesta(
         )
 
     texto = _extraer_texto(respuesta)
+    if not texto and listas_programadas:
+        return "", True  # la lista ya trae la pregunta: no hace falta mas texto
     if not texto and fotos_enviadas:
         texto = "Ahi te van las fotos. ¿Cual te late mas?"
     if not texto:

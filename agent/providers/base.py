@@ -60,6 +60,12 @@ class ProveedorWhatsApp(ABC):
         """Envia un video (MP4) con pie de texto. Por defecto no esta soportado."""
         return False
 
+    async def enviar_lista(
+        self, telefono: str, cuerpo: str, boton: str, filas: list[dict], contexto: dict | None = None
+    ) -> bool:
+        """Envia una lista interactiva (menu con opciones). Por defecto no esta soportado."""
+        return False
+
     async def descargar_adjunto(self, url: str, contexto: dict | None = None) -> bytes | None:
         """Baja un adjunto entrante (audio, imagen...). Por defecto no esta soportado."""
         return None

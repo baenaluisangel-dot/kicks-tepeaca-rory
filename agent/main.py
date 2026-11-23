@@ -72,6 +72,7 @@ from agent.memory import (
     marcar_evento_procesado,
     obtener_historial,
 )
+from agent import interactivo
 from agent.audio import transcribir
 from agent.notificar import avisar_por_telegram, enlace_cliente
 from agent.panel import bucle_resumen_diario, fecha_bonita, fecha_hoy_iso, router as panel_router
@@ -627,6 +628,22 @@ async def procesar_mensaje(msg: MensajeEntrante):
                         f"{', horario ' + detalle if detalle else ''}. Dile al cliente que quedo agendada "
                         "y que un companero le confirma la existencia por este chat.")
 
+            lista_pendiente: dict = {}
+
+            async def lista_zonas_tool() -> str:
+                """La usa Claude: programa la lista de zonas (se manda despues de su texto)."""
+                lista_pendiente["datos"] = interactivo.lista_zonas()
+                return "OK: se enviara la lista de zonas al cliente. Escribe como maximo una frase muy corta, o nada."
+
+            async def lista_dias_tool(zona: str) -> str:
+                """La usa Claude: programa la lista de dias de entrega abiertos para la zona."""
+                dias = await dias_disponibles(zona, fecha_hoy_iso())
+                if not dias:
+                    return ("No hay dias de entrega abiertos para esa zona por ahora. Usa avisar_equipo "
+                            "con tipo 'pedido' y dile al cliente que el equipo le confirma el dia.")
+                lista_pendiente["datos"] = interactivo.lista_dias(zona, dias)
+                return "OK: se enviara la lista de dias al cliente. Escribe como maximo una frase muy corta, o nada."
+
             respuesta, es_respuesta_real = await generar_respuesta(
                 texto_para_ia,
                 historial,
@@ -636,13 +653,25 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 modo,
                 avisar_equipo,
                 enviar_fotos_paquete if es_puebla else None,
-                ver_dias_entrega if es_puebla else None,
+                None,
                 agendar_entrega if es_puebla else None,
                 (await listar_ejemplos(modo, 15))[::-1],
                 enviar_video if es_puebla else None,
+                lista_zonas_tool if es_puebla else None,
+                lista_dias_tool if es_puebla else None,
             )
 
-            enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto)
+            enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto) if respuesta else True
+
+            # Lista de opciones (zonas o dias): va despues del texto. Si Zernio la rechaza,
+            # se manda como texto con las opciones.
+            datos_lista = lista_pendiente.get("datos")
+            if enviado and datos_lista:
+                if not await proveedor.enviar_lista(
+                    msg.telefono, datos_lista["cuerpo"], datos_lista["boton"], datos_lista["filas"], msg.contexto
+                ):
+                    await proveedor.enviar_mensaje(msg.telefono, datos_lista["texto_alterno"], msg.contexto)
+                fotos_mandadas.append(datos_lista["nota"])
 
             if not enviado:
                 # El evento se marco como procesado ANTES de llegar hasta aca, para que dos

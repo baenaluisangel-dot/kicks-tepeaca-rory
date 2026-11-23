@@ -16,6 +16,7 @@ import os
 import httpx
 from fastapi import Request
 
+from agent.interactivo import texto_de_seleccion
 from agent.providers.base import MensajeEntrante, ProveedorWhatsApp
 
 logger = logging.getLogger("agentkit")
@@ -159,6 +160,19 @@ class ProveedorZernio(ProveedorWhatsApp):
                 telefono = remitente.get("businessScopedUserId") or remitente.get("id") or ""
 
         cuenta = payload.get("account") or {}
+
+        # El cliente toco una opcion de una lista o boton: el id viene en metadata
+        meta_msg = mensaje.get("metadata") if isinstance(mensaje.get("metadata"), dict) else {}
+        meta_pay = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        interactive_id = meta_msg.get("interactiveId") or meta_pay.get("interactiveId") or ""
+        if interactive_id or meta_msg.get("interactiveType") or meta_pay.get("interactiveType"):
+            logger.info(
+                f"Seleccion interactiva: tipo={meta_msg.get('interactiveType') or meta_pay.get('interactiveType')} "
+                f"id={str(interactive_id)[:60]} texto_presente={'si' if texto.strip() else 'no'}"
+            )
+        seleccion = texto_de_seleccion(str(interactive_id))
+        if seleccion:
+            texto = seleccion
 
         # Nota de voz de WhatsApp: viene como adjunto de tipo "audio" (con o sin texto)
         audio_url = ""
@@ -402,6 +416,50 @@ class ProveedorZernio(ProveedorWhatsApp):
         if r.status_code == 200:
             return True
         logger.error(f"Zernio rechazo la imagen [{r.status_code}]: {r.text[:500]}")
+        return False
+
+    async def enviar_lista(
+        self, telefono: str, cuerpo: str, boton: str, filas: list[dict], contexto: dict | None = None
+    ) -> bool:
+        """Manda una lista interactiva de WhatsApp (menu con opciones, maximo 10)."""
+        contexto = contexto or {}
+        conversation_id = contexto.get("conversation_id")
+        account_id = contexto.get("account_id") or self.account_id
+        api_key = self._api_key(contexto)
+        if not api_key or not conversation_id or not account_id:
+            logger.error("No se puede enviar la lista: faltan API key, conversation_id o account_id")
+            return False
+        interactive = {
+            "type": "list",
+            "body": {"text": cuerpo[:1024]},
+            "action": {
+                "button": boton[:20],
+                "sections": [{"title": "Opciones", "rows": [
+                    {"id": f["id"][:200], "title": f["title"][:24], "description": (f.get("description") or "")[:72]}
+                    for f in filas[:10]
+                ]}],
+            },
+        }
+        evento_id = contexto.get("evento_id")
+        for incluir_message in (False, True):
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            if evento_id:
+                headers["Idempotency-Key"] = f"agentkit-{evento_id}-lista-{int(incluir_message)}"
+            cuerpo_json = {"accountId": account_id, "interactive": interactive}
+            if incluir_message:
+                cuerpo_json["message"] = cuerpo[:1024]
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as cliente:
+                    r = await cliente.post(
+                        f"{self.base_url}/inbox/conversations/{conversation_id}/messages",
+                        json=cuerpo_json, headers=headers,
+                    )
+            except httpx.HTTPError as e:
+                logger.error(f"Error de red mandando la lista a Zernio: {e}")
+                return False
+            if r.status_code == 200:
+                return True
+            logger.error(f"Zernio rechazo la lista (con message={incluir_message}) [{r.status_code}]: {r.text[:500]}")
         return False
 
     async def descargar_adjunto(self, url: str, contexto: dict | None = None) -> bytes | None:

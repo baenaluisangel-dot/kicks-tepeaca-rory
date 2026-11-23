@@ -17,6 +17,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from agent import interactivo
 from agent.brain import generar_respuesta
 from agent.catalogo import VIDEOS_TOY_STORY, ZONAS_PUEBLA, obtener_producto
 from agent.memory import (
@@ -519,7 +520,7 @@ async function enviar(){
     const d=await r.json(); esp.remove();
     (d.acciones||[]).forEach(a=>chat.insertAdjacentHTML('beforeend','<div class="acc">'+esc(a)+'</div>'));
     const id='r'+Date.now();
-    chat.insertAdjacentHTML('beforeend','<div class="b rory" id="'+id+'"><small>Rory</small>'+esc(d.respuesta)
+    chat.insertAdjacentHTML('beforeend','<div class="b rory" id="'+id+'"><small>Rory</small>'+esc(d.respuesta||'(solo manda la lista de opciones)')
       +'<div class="acts"><button onclick="guardar(\\''+id+'\\',true)">👍 Así está bien</button><button onclick="abrir(\\''+id+'\\')">✏️ Así lo diría yo</button></div>'
       +'<div id="'+id+'f" style="display:none;margin-top:8px"><textarea rows="3" placeholder="Escribe cómo lo contestarías tú"></textarea><input type="text" style="width:100%;margin-top:6px" placeholder="Nota opcional (ej.: mando primero las fotos del paquete y luego el precio)"><div class="acts"><button class="pri" onclick="guardar(\\''+id+'\\',false)">Guardar ejemplo</button></div></div></div>');
     const el=document.getElementById(id); el.dataset.cliente=texto; el.dataset.rory=d.respuesta;
@@ -609,6 +610,20 @@ async def panel_practica_mensaje(request: Request):
         acciones.append(f"📅 Agendaría la entrega ({fecha}, {zona}, {nombre}): {pedido}")
         return f"OK: agendada para {fecha} en {zona}. Dile al cliente que quedo agendada y que un companero le confirma la existencia."
 
+    async def lista_zonas_p() -> str:
+        d = interactivo.lista_zonas()
+        acciones.append("📋 Mandaría la LISTA de zonas: " + ", ".join(f["title"] for f in d["filas"]))
+        return "OK: se enviara la lista de zonas al cliente. Escribe como maximo una frase muy corta, o nada."
+
+    async def lista_dias_p(zona: str) -> str:
+        dias = await dias_disponibles(zona, fecha_hoy_iso())
+        if not dias:
+            acciones.append(f"📋 No hay días abiertos para {zona}")
+            return "No hay dias de entrega abiertos para esa zona por ahora. Usa avisar_equipo con tipo 'pedido' y dile al cliente que el equipo le confirma el dia."
+        d = interactivo.lista_dias(zona, dias)
+        acciones.append(f"📋 Mandaría la LISTA de días para {zona}: " + ", ".join(f["title"] for f in d["filas"]))
+        return "OK: se enviara la lista de dias al cliente. Escribe como maximo una frase muy corta, o nada."
+
     texto_ia = texto
     if es_puebla and not historial:
         acciones.append("📎 Mandaría el PDF de paquetes (automático en el primer mensaje)")
@@ -617,9 +632,11 @@ async def panel_practica_mensaje(request: Request):
                      "no uses enviar_catalogo.]")
     respuesta, _ = await generar_respuesta(
         texto_ia, historial, foto, catalogo, "whatsapp" if es_puebla else "instagram", modo, avisar,
-        fotos_paquete if es_puebla else None, ver_dias if es_puebla else None, agendar if es_puebla else None,
+        fotos_paquete if es_puebla else None, None, agendar if es_puebla else None,
         (await listar_ejemplos(modo, 15))[::-1],
         video if es_puebla else None,
+        lista_zonas_p if es_puebla else None,
+        lista_dias_p if es_puebla else None,
     )
     return {"respuesta": respuesta, "acciones": acciones}
 
