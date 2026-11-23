@@ -420,12 +420,24 @@ class Configuracion(Base):
 
 ORDEN_RUTA = ["Amozoc", "Valsequillo", "CU", "Peri Plaza", "Angelópolis", "Centro", "CAPU"]
 
+# Donde se entrega en cada zona (las piezas sueltas se recogen ahi). Vacio = el equipo lo confirma.
+PUNTOS_DEFECTO = {
+    "Amozoc": "",
+    "Valsequillo": "AutoZone de Valsequillo",
+    "CU": "Entrada principal de la universidad (CU)",
+    "Peri Plaza": "Peri Plaza",
+    "Angelópolis": "La Estrella de Puebla (La Rueda), en Angelópolis",
+    "Centro": "",
+    "CAPU": "",
+}
+
 
 def config_ruta_defecto() -> dict:
     """La ruta habitual: una zona por hora desde la 1 PM; lunes, martes, jueves, sabado y domingo."""
     paradas = []
     for n, zona in enumerate(ORDEN_RUTA):
-        paradas.append({"zona": zona, "inicio": f"{13 + n:02d}:00", "fin": f"{14 + n:02d}:00", "cupo": 3})
+        paradas.append({"zona": zona, "inicio": f"{13 + n:02d}:00", "fin": f"{14 + n:02d}:00", "cupo": 3,
+                        "punto": PUNTOS_DEFECTO.get(zona, "")})
     return {"dias": [0, 1, 3, 5, 6], "paradas": paradas, "anticipacion_dias": 1, "semanas": 3, "bloqueados": []}
 
 
@@ -470,7 +482,19 @@ async def obtener_config_ruta() -> dict:
         guardada = json.loads(fila.valor)
     except ValueError:
         return defecto
-    return {**defecto, **{k: v for k, v in guardada.items() if k in defecto}}
+    cfg = {**defecto, **{k: v for k, v in guardada.items() if k in defecto}}
+    # Configuraciones guardadas antes de que existieran los puntos: se completan con los de fabrica
+    for p in cfg["paradas"]:
+        if "punto" not in p:
+            p["punto"] = PUNTOS_DEFECTO.get(p["zona"], "")
+    return cfg
+
+
+async def punto_de_entrega(zona: str) -> str:
+    """Donde se entrega en esa zona ('' si todavia no esta definido)."""
+    z = _sin_acentos(zona)
+    cfg = await obtener_config_ruta()
+    return next((p.get("punto", "") for p in cfg["paradas"] if _sin_acentos(p["zona"]) == z), "")
 
 
 async def guardar_config_ruta(cfg: dict):
@@ -514,7 +538,7 @@ async def listar_agenda(hoy_iso: str) -> list[dict]:
             lista = [e for e in ents if e.fecha == f and _sin_acentos(e.zona) == z]
             paradas.append({
                 "zona": p["zona"], "horario": f"{p['inicio']} a {p['fin']}", "cupo": p["cupo"],
-                "ocupados": len(lista),
+                "punto": p.get("punto", ""), "ocupados": len(lista),
                 "entregas": [{"id": e.id, "telefono": e.telefono, "nombre": e.nombre, "pedido": e.pedido, "estado": e.estado, "suelto": bool(e.suelto)} for e in lista],
             })
         agenda.append({"fecha": f, "paradas": paradas})
@@ -537,7 +561,7 @@ async def dias_disponibles(zona: str, desde_fecha: str) -> list[dict]:
             for f in fechas:
                 usados = sum(1 for e in ents if e.fecha == f and _sin_acentos(e.zona) == z)
                 if parada["cupo"] > usados:
-                    salida[f] = {"fecha": f, "horario": f"{parada['inicio']} a {parada['fin']}", "quedan": parada["cupo"] - usados}
+                    salida[f] = {"fecha": f, "horario": f"{parada['inicio']} a {parada['fin']}", "quedan": parada["cupo"] - usados, "punto": parada.get("punto", "")}
     # Dias extra abiertos a mano (por ejemplo un dia fuera de la ruta)
     for r in await listar_rutas(desde_fecha):
         if r["fecha"] in salida:
@@ -565,7 +589,7 @@ async def rutas_con_pedido_grande(desde_fecha: str) -> list[dict]:
             de_la_parada = [e for e in ents if e.fecha == f and _sin_acentos(e.zona) == z]
             if any(not e.suelto for e in de_la_parada) and len(de_la_parada) < p["cupo"]:
                 salida.append({"fecha": f, "zona": p["zona"], "horario": f"{p['inicio']} a {p['fin']}",
-                               "quedan": p["cupo"] - len(de_la_parada)})
+                               "quedan": p["cupo"] - len(de_la_parada), "punto": p.get("punto", "")})
     return salida
 
 

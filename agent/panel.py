@@ -478,7 +478,8 @@ async def panel_entregas(token: str = "", ok: str = ""):
             f'<input type="hidden" name="zona_{n}" value="{html.escape(p["zona"], quote=True)}">'
             f'<label class="mut small">de <input type="time" name="inicio_{n}" value="{p["inicio"]}"></label>'
             f'<label class="mut small">a <input type="time" name="fin_{n}" value="{p["fin"]}"></label>'
-            f'<label class="mut small">entregas <input type="number" name="cupo_{n}" value="{p["cupo"]}" min="1" style="width:70px"></label></div>'
+            f'<label class="mut small">entregas <input type="number" name="cupo_{n}" value="{p["cupo"]}" min="1" style="width:70px"></label>'
+            f'<label class="mut small" style="flex:1;min-width:220px">punto de entrega <input type="text" name="punto_{n}" value="{html.escape(p.get("punto", ""), quote=True)}" placeholder="Dónde se entrega (ej. AutoZone de Valsequillo)" style="width:100%"></label></div>'
         )
     bloq = ", ".join(cfg.get("bloqueados", []))
     editor = (
@@ -538,7 +539,8 @@ async def panel_ruta_semanal(request: Request):
             cupo = max(1, int(form.get(f"cupo_{n}") or p["cupo"]))
         except (ValueError, AssertionError):
             return RedirectResponse(f"/panel/entregas?token={quote(token)}&ok={quote('Revisa las horas y los cupos')}", status_code=303)
-        paradas.append({"zona": p["zona"], "inicio": inicio, "fin": fin, "cupo": cupo})
+        punto = str(form.get(f"punto_{n}", p.get("punto", "")) or "").strip()[:120]
+        paradas.append({"zona": p["zona"], "inicio": inicio, "fin": fin, "cupo": cupo, "punto": punto})
     dias = sorted({int(d) for d in form.getlist("dias") if str(d).isdigit() and 0 <= int(d) <= 6})
     bloqueados = []
     for t in str(form.get("bloqueados", "")).replace(";", ",").split(","):

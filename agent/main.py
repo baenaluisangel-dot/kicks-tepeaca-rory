@@ -56,6 +56,7 @@ from agent.memory import (
     crear_entrega,
     crear_ruta,
     dias_disponibles,
+    punto_de_entrega,
     rutas_con_pedido_grande,
     listar_avisos,
     listar_entregas,
@@ -662,8 +663,15 @@ async def procesar_mensaje(msg: MensajeEntrante):
                     f"{fecha_bonita(fecha)} · {zona} · {detalle or ''}\n"
                     f"Cliente: {nombre} — {enlace_cliente(msg.telefono, plataforma)}\nPedido: {pedido}"
                 )
+                punto = await punto_de_entrega(zona)
+                if pieza_suelta:
+                    donde = (f" Como es una pieza suelta (sin costo de envio), el cliente debe acercarse al punto de entrega: {punto}."
+                             if punto else " Como es una pieza suelta (sin costo de envio), el cliente debe acercarse a la zona; el equipo le confirma el punto exacto.")
+                else:
+                    donde = (f" El punto de entrega de la zona es: {punto} (si pidio que se la lleven a su lugar, anotaste su referencia)."
+                             if punto else "")
                 return (f"OK: agendada para {fecha_bonita(fecha)} en {zona}"
-                        f"{', horario ' + detalle if detalle else ''}. Dile al cliente que quedo agendada "
+                        f"{', horario ' + detalle if detalle else ''}.{donde} Dile al cliente que quedo agendada "
                         "y que un companero le confirma la existencia por este chat.")
 
             lista_pendiente: dict = {}

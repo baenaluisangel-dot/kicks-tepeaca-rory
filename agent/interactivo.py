@@ -74,11 +74,13 @@ def lista_rutas(items: list[dict]) -> dict:
     filas = []
     for it in items[: MAX_FILAS - 1]:
         etiqueta = f"{_fecha_corta(it['fecha'])} · {it['zona']}"
+        desc = f"{it['horario']} · {it['punto']}" if it.get("punto") else f"{it['horario']} · quedan {it['quedan']}"
         filas.append({"id": f"dia:{it['fecha']}|{it['zona']}", "title": etiqueta[:MAX_TITULO],
-                      "description": f"{it['horario']} · quedan {it['quedan']}"[:MAX_DESCRIPCION]})
+                      "description": desc[:MAX_DESCRIPCION]})
     filas.append({"id": "dia:otro|", "title": "Ninguna me acomoda", "description": "El equipo te avisa cuando haya ruta"})
     texto = "Ya vamos a pasar por estas zonas:\n" + "\n".join(
-        f"• {_fecha_larga(it['fecha'])}: {it['zona']} ({it['horario']})" for it in items[: MAX_FILAS - 1]
+        f"• {_fecha_larga(it['fecha'])}: {it['zona']} ({it['horario']}" + (f", {it['punto']}" if it.get("punto") else "") + ")"
+        for it in items[: MAX_FILAS - 1]
     ) + "\n¿Te queda alguna?"
     nota = "lista de rutas programadas: " + ", ".join(f"{it['fecha']} {it['zona']}" for it in items[: MAX_FILAS - 1])
     return {
