@@ -135,3 +135,11 @@ VIDEOS_TOY_STORY: dict[str, tuple[str, str]] = {
 def url_video(archivo: str) -> str | None:
     base = url_base()
     return f"{base}/videos/{archivo}" if base else None
+
+
+ARCHIVO_AUDIO_BIENVENIDA = "bienvenida.ogg"
+
+
+def url_audio(archivo: str) -> str | None:
+    base = url_base()
+    return f"{base}/audios/{archivo}" if base else None

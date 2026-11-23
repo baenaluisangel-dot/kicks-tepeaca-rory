@@ -394,6 +394,38 @@ class ProveedorZernio(ProveedorWhatsApp):
         logger.error(f"Zernio rechazo la imagen [{r.status_code}]: {r.text[:500]}")
         return False
 
+    async def enviar_audio(self, telefono: str, url: str, contexto: dict | None = None) -> bool:
+        """Manda una nota de voz (OGG/Opus mono). Se intenta como nota de voz de WhatsApp y, si
+        Zernio la rechaza, como audio normal."""
+        contexto = contexto or {}
+        conversation_id = contexto.get("conversation_id")
+        account_id = contexto.get("account_id") or self.account_id
+        api_key = self._api_key(contexto)
+        if not api_key or not conversation_id or not account_id:
+            logger.error("No se puede enviar el audio: faltan API key, conversation_id o account_id")
+            return False
+        for como_nota_de_voz in (True, False):
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            evento_id = contexto.get("evento_id")
+            if evento_id:
+                headers["Idempotency-Key"] = f"agentkit-{evento_id}-audio-{url.rsplit('/', 1)[-1]}-{int(como_nota_de_voz)}"
+            cuerpo = {"accountId": account_id, "message": "", "attachmentUrl": url, "attachmentType": "audio"}
+            if como_nota_de_voz:
+                cuerpo["voiceNote"] = True
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as cliente:
+                    r = await cliente.post(
+                        f"{self.base_url}/inbox/conversations/{conversation_id}/messages",
+                        json=cuerpo, headers=headers,
+                    )
+            except httpx.HTTPError as e:
+                logger.error(f"Error de red mandando audio a Zernio: {e}")
+                return False
+            if r.status_code == 200:
+                return True
+            logger.error(f"Zernio rechazo el audio (voiceNote={como_nota_de_voz}) [{r.status_code}]: {r.text[:500]}")
+        return False
+
     async def enviar_video(
         self, telefono: str, url: str, texto: str, contexto: dict | None = None
     ) -> bool:

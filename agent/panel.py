@@ -612,6 +612,7 @@ async def panel_practica_mensaje(request: Request):
     texto_ia = texto
     if es_puebla and not historial:
         acciones.append("📎 Mandaría el PDF de paquetes (automático en el primer mensaje)")
+        acciones.append("🎙️ Mandaría tu nota de voz de bienvenida (automática en el primer mensaje)")
         texto_ia += ("\n\n[Nota interna: el sistema ya le envió el PDF de paquetes en este turno; "
                      "no uses enviar_catalogo.]")
     respuesta, _ = await generar_respuesta(

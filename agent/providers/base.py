@@ -60,6 +60,10 @@ class ProveedorWhatsApp(ABC):
         """Envia un video (MP4) con pie de texto. Por defecto no esta soportado."""
         return False
 
+    async def enviar_audio(self, telefono: str, url: str, contexto: dict | None = None) -> bool:
+        """Envia una nota de voz (OGG/Opus). Por defecto no esta soportado."""
+        return False
+
     async def verificar_firma(self, request: Request) -> bool:
         """
         Confirma que el webhook viene de verdad del proveedor.

@@ -24,7 +24,9 @@ from fastapi.staticfiles import StaticFiles
 from agent.brain import MAX_FOTOS_POR_RESPUESTA, generar_respuesta, obtener_mensaje_error
 from agent.catalogo import (
     ARCHIVO_CATALOGO_PDF,
+    ARCHIVO_AUDIO_BIENVENIDA,
     ARCHIVO_PAQUETES_PDF,
+    url_audio,
     PAQUETES_PUEBLA,
     VIDEOS_TOY_STORY,
     ZONAS_PUEBLA,
@@ -145,6 +147,8 @@ app.mount("/fotos", StaticFiles(directory="static/fotos"), name="fotos")
 app.mount("/catalogo", StaticFiles(directory="static/catalogo"), name="catalogo")
 # Videos cortos de los juguetes (MP4).
 app.mount("/videos", StaticFiles(directory="static/videos"), name="videos")
+# Nota de voz de bienvenida (OGG/Opus).
+app.mount("/audios", StaticFiles(directory="static/audios"), name="audios")
 
 
 @app.get("/")
@@ -538,6 +542,10 @@ async def procesar_mensaje(msg: MensajeEntrante):
             ya_mando_pdf = any("paquetes en PDF" in m["content"] for m in historial)
             if es_puebla and not ya_mando_pdf:
                 if (await enviar_catalogo()).startswith("OK"):
+                    # Nota de voz de bienvenida (grabada por el dueño): da confianza
+                    url_nota = url_audio(ARCHIVO_AUDIO_BIENVENIDA)
+                    if url_nota and await proveedor.enviar_audio(msg.telefono, url_nota, msg.contexto):
+                        fotos_mandadas.append("la nota de voz de bienvenida")
                     texto_para_ia += (
                         "\n\n[Nota interna: el sistema ya le envió el PDF de paquetes en este "
                         "turno; no uses enviar_catalogo.]"
