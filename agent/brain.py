@@ -169,6 +169,10 @@ HERRAMIENTA_AGENDAR = {
             "zona": {"type": "string", "enum": ZONAS_PUEBLA},
             "nombre": {"type": "string"},
             "pedido": {"type": "string", "description": "Que llevara y el total, ej: 'Dúo Woody y Buzz, $1,250'."},
+            "preferencia_horario": {
+                "type": "string",
+                "description": "Opcional: si el horario de su zona no le acomoda, cuando le conviene (ej: 'despues de las 7 PM'). El equipo lo coordina.",
+            },
         },
         "required": ["fecha", "zona", "nombre", "pedido"],
     },
@@ -428,7 +432,8 @@ async def generar_respuesta(
             elif bloque.name == "agendar_entrega" and agendar:
                 d = bloque.input or {}
                 resultado = await agendar(
-                    d.get("fecha", ""), d.get("zona", ""), d.get("nombre", ""), d.get("pedido", "")
+                    d.get("fecha", ""), d.get("zona", ""), d.get("nombre", ""), d.get("pedido", ""),
+                    d.get("preferencia_horario", ""),
                 )
             elif bloque.name == "avisar_equipo" and avisar_equipo:
                 resultado = await avisar_equipo(

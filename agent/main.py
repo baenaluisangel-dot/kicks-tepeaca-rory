@@ -611,8 +611,10 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 ]
                 return "Dias disponibles en " + zona + ":\n" + "\n".join(lineas)
 
-            async def agendar_entrega(fecha: str, zona: str, nombre: str, pedido: str) -> str:
+            async def agendar_entrega(fecha: str, zona: str, nombre: str, pedido: str, preferencia_horario: str = "") -> str:
                 """La usa Claude: agenda la entrega (por confirmar) y avisa al equipo."""
+                if preferencia_horario.strip():
+                    pedido = f"{pedido} — Horario preferido: {preferencia_horario.strip()}"
                 ok, detalle = await crear_entrega(msg.telefono, fecha, zona, nombre, pedido, fecha_hoy_iso())
                 if not ok:
                     return f"ERROR: {detalle} Vuelve a llamar ver_dias_entrega y ofrece otro dia."

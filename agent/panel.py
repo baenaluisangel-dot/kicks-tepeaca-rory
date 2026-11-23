@@ -703,8 +703,9 @@ async def panel_practica_mensaje(request: Request):
             f"- {d['fecha']} ({fecha_bonita(d['fecha'])}), horario {d['horario'] or 'por confirmar'}, quedan {d['quedan']} lugares"
             for d in dias[:5])
 
-    async def agendar(fecha: str, zona: str, nombre: str, pedido: str) -> str:
-        acciones.append(f"📅 Agendaría la entrega ({fecha}, {zona}, {nombre}): {pedido}")
+    async def agendar(fecha: str, zona: str, nombre: str, pedido: str, preferencia_horario: str = "") -> str:
+        extra = f" — horario preferido: {preferencia_horario}" if preferencia_horario else ""
+        acciones.append(f"📅 Agendaría la entrega ({fecha}, {zona}, {nombre}): {pedido}{extra}")
         return f"OK: agendada para {fecha} en {zona}. Dile al cliente que quedo agendada y que un companero le confirma la existencia."
 
     async def lista_zonas_p() -> str:
