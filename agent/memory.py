@@ -422,13 +422,13 @@ ORDEN_RUTA = ["Amozoc", "Valsequillo", "CU", "Peri Plaza", "Angelópolis", "Cent
 
 # Donde se entrega en cada zona (las piezas sueltas se recogen ahi). Vacio = el equipo lo confirma.
 PUNTOS_DEFECTO = {
-    "Amozoc": "",
+    "Amozoc": "Cerca de Chachapa: en la Bimbo o en el Little Caesars (donde está la gran bodega)",
     "Valsequillo": "AutoZone de Valsequillo",
     "CU": "Entrada principal de la universidad (CU)",
     "Peri Plaza": "Peri Plaza",
     "Angelópolis": "La Estrella de Puebla (La Rueda), en Angelópolis",
-    "Centro": "",
-    "CAPU": "",
+    "Centro": "Al lado de la catedral",
+    "CAPU": "Dentro de la terminal de autobuses (CAPU)",
 }
 
 
@@ -485,7 +485,7 @@ async def obtener_config_ruta() -> dict:
     cfg = {**defecto, **{k: v for k, v in guardada.items() if k in defecto}}
     # Configuraciones guardadas antes de que existieran los puntos: se completan con los de fabrica
     for p in cfg["paradas"]:
-        if "punto" not in p:
+        if not p.get("punto"):
             p["punto"] = PUNTOS_DEFECTO.get(p["zona"], "")
     return cfg
 
