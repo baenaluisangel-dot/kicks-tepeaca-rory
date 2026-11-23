@@ -13,7 +13,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
-from sqlalchemy import DateTime, Integer, String, Text, case, delete, func, select
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, case, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -367,6 +367,8 @@ class Entrega(Base):
     pedido: Mapped[str] = mapped_column(Text, default="")
     estado: Mapped[str] = mapped_column(String(20), default="por_confirmar")  # por_confirmar | confirmada | cancelada
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
+    # True = una sola pieza suelta que se lleva aprovechando una ruta que ya tiene un pedido grande
+    suelto: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 def _sin_acentos(t: str) -> str:
@@ -513,7 +515,7 @@ async def listar_agenda(hoy_iso: str) -> list[dict]:
             paradas.append({
                 "zona": p["zona"], "horario": f"{p['inicio']} a {p['fin']}", "cupo": p["cupo"],
                 "ocupados": len(lista),
-                "entregas": [{"id": e.id, "telefono": e.telefono, "nombre": e.nombre, "pedido": e.pedido, "estado": e.estado} for e in lista],
+                "entregas": [{"id": e.id, "telefono": e.telefono, "nombre": e.nombre, "pedido": e.pedido, "estado": e.estado, "suelto": bool(e.suelto)} for e in lista],
             })
         agenda.append({"fecha": f, "paradas": paradas})
     return agenda
@@ -545,11 +547,38 @@ async def dias_disponibles(zona: str, desde_fecha: str) -> list[dict]:
     return [salida[k] for k in sorted(salida)]
 
 
-async def crear_entrega(telefono: str, fecha: str, zona: str, nombre: str, pedido: str, desde_fecha: str) -> tuple[bool, str]:
-    """Agenda la entrega si ese dia hay ruta para la zona y queda lugar. Devuelve (ok, mensaje)."""
+async def rutas_con_pedido_grande(desde_fecha: str) -> list[dict]:
+    """Dias y zonas de la ruta semanal que ya tienen un pedido grande (paquete o 2+ juguetes)
+    agendado y todavia lugar: ahi se puede meter una pieza suelta porque ya se va a pasar."""
+    cfg = await obtener_config_ruta()
+    fechas = fechas_de_ruta(cfg, desde_fecha)
+    if not fechas:
+        return []
+    async with async_session() as session:
+        ents = (await session.execute(
+            select(Entrega).where(Entrega.fecha.in_(fechas), Entrega.estado != "cancelada")
+        )).scalars().all()
+    salida = []
+    for f in fechas:
+        for p in cfg["paradas"]:
+            z = _sin_acentos(p["zona"])
+            de_la_parada = [e for e in ents if e.fecha == f and _sin_acentos(e.zona) == z]
+            if any(not e.suelto for e in de_la_parada) and len(de_la_parada) < p["cupo"]:
+                salida.append({"fecha": f, "zona": p["zona"], "horario": f"{p['inicio']} a {p['fin']}",
+                               "quedan": p["cupo"] - len(de_la_parada)})
+    return salida
+
+
+async def crear_entrega(telefono: str, fecha: str, zona: str, nombre: str, pedido: str, desde_fecha: str, suelto: bool = False) -> tuple[bool, str]:
+    """Agenda la entrega si ese dia hay ruta para la zona y queda lugar. Una pieza suelta solo se
+    agenda si esa parada ya tiene un pedido grande. Devuelve (ok, mensaje)."""
     disp = next((d for d in await dias_disponibles(zona, desde_fecha) if d["fecha"] == fecha), None)
     if not disp:
         return False, "Ese dia no hay entregas para esa zona o ya se lleno."
+    if suelto:
+        z = _sin_acentos(zona)
+        if not any(r["fecha"] == fecha and _sin_acentos(r["zona"]) == z for r in await rutas_con_pedido_grande(desde_fecha)):
+            return False, "Para una pieza suelta solo se puede en un dia y zona donde ya hay un pedido grande agendado."
     async with async_session() as session:
         ya = (await session.execute(select(Entrega).where(
             Entrega.telefono == telefono, Entrega.fecha == fecha, Entrega.estado != "cancelada"
@@ -557,7 +586,7 @@ async def crear_entrega(telefono: str, fecha: str, zona: str, nombre: str, pedid
         if ya:
             return True, disp["horario"]
         session.add(Entrega(telefono=telefono, fecha=fecha, zona=zona[:40], nombre=nombre[:100],
-                            pedido=pedido[:600], estado="por_confirmar", creado_en=ahora()))
+                            pedido=pedido[:600], estado="por_confirmar", creado_en=ahora(), suelto=bool(suelto)))
         await session.commit()
     return True, disp["horario"]
 
@@ -568,7 +597,7 @@ async def listar_entregas(desde_fecha: str) -> list[dict]:
             select(Entrega).where(Entrega.fecha >= desde_fecha, Entrega.estado != "cancelada").order_by(Entrega.fecha, Entrega.id)
         )).scalars().all()
     return [{"id": f.id, "telefono": f.telefono, "fecha": f.fecha, "zona": f.zona, "nombre": f.nombre,
-             "pedido": f.pedido, "estado": f.estado} for f in filas]
+             "pedido": f.pedido, "estado": f.estado, "suelto": bool(f.suelto)} for f in filas]
 
 
 async def cambiar_estado_entrega(entrega_id: int, estado: str):
@@ -618,9 +647,22 @@ async def borrar_ejemplo(ejemplo_id: int):
 
 
 async def inicializar_db():
-    """Crea las tablas si no existen."""
+    """Crea las tablas si no existen y agrega las columnas nuevas a las tablas que ya existian."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # create_all no agrega columnas a una tabla vieja: se hace a mano, una por una
+    sentencias = (
+        ["ALTER TABLE entregas ADD COLUMN IF NOT EXISTS suelto BOOLEAN DEFAULT FALSE"]
+        if engine.dialect.name == "postgresql"
+        else ["ALTER TABLE entregas ADD COLUMN suelto BOOLEAN DEFAULT 0"]
+    )
+    from sqlalchemy import text as _sql
+    for sentencia in sentencias:
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(_sql(sentencia))
+        except Exception:  # noqa: BLE001 — la columna ya existe
+            pass
 
 
 async def marcar_evento_procesado(evento_id: str) -> bool:

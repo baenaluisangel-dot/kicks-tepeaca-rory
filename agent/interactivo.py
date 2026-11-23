@@ -69,6 +69,27 @@ def lista_dias(zona: str, dias: list[dict]) -> dict:
     }
 
 
+def lista_rutas(items: list[dict]) -> dict:
+    """items: [{"fecha","zona","horario","quedan"}] — dias y zonas donde ya se va a pasar."""
+    filas = []
+    for it in items[: MAX_FILAS - 1]:
+        etiqueta = f"{_fecha_corta(it['fecha'])} · {it['zona']}"
+        filas.append({"id": f"dia:{it['fecha']}|{it['zona']}", "title": etiqueta[:MAX_TITULO],
+                      "description": f"{it['horario']} · quedan {it['quedan']}"[:MAX_DESCRIPCION]})
+    filas.append({"id": "dia:otro|", "title": "Ninguna me acomoda", "description": "El equipo te avisa cuando haya ruta"})
+    texto = "Ya vamos a pasar por estas zonas:\n" + "\n".join(
+        f"• {_fecha_larga(it['fecha'])}: {it['zona']} ({it['horario']})" for it in items[: MAX_FILAS - 1]
+    ) + "\n¿Te queda alguna?"
+    nota = "lista de rutas programadas: " + ", ".join(f"{it['fecha']} {it['zona']}" for it in items[: MAX_FILAS - 1])
+    return {
+        "cuerpo": "Ya vamos a pasar por estas zonas y días. Toca el botón y elige la que te quede 👇",
+        "boton": "Ver rutas",
+        "filas": filas,
+        "texto_alterno": texto,
+        "nota": nota,
+    }
+
+
 def texto_de_seleccion(opcion_id: str) -> str | None:
     """Convierte el id de la opcion que toco el cliente en una frase para Rory."""
     if not opcion_id:

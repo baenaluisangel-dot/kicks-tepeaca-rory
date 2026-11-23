@@ -29,6 +29,7 @@ from agent.memory import (
     guardar_ejemplo,
     guardar_config_ruta,
     listar_agenda,
+    rutas_con_pedido_grande,
     listar_atencion,
     obtener_config_ruta,
     listar_ejemplos,
@@ -420,6 +421,7 @@ def _entrega_html(token: str, e: dict) -> str:
     confirmada = e["estado"] == "confirmada"
     return (
         f'<div class="ent"><span class="badge {"ok" if confirmada else "warn"}">{"Confirmada" if confirmada else "Por confirmar"}</span>'
+        + ('<span class="badge info">Pieza suelta</span>' if e.get("suelto") else "") +
         f'<span><b>{html.escape(e["nombre"])}</b> · {html.escape(e["pedido"])}</span>'
         f'<a class="btn" href="/panel/chat?token={quote(token)}&tel={quote(e["telefono"])}">Ver chat</a>'
         + ("" if confirmada else _boton(token, "/panel/entrega", {"id": e["id"], "estado": "confirmada"}, "Confirmar", "pri", "/panel/entregas"))
@@ -709,7 +711,7 @@ async def panel_practica_mensaje(request: Request):
             f"- {d['fecha']} ({fecha_bonita(d['fecha'])}), horario {d['horario'] or 'por confirmar'}, quedan {d['quedan']} lugares"
             for d in dias[:5])
 
-    async def agendar(fecha: str, zona: str, nombre: str, pedido: str, preferencia_horario: str = "") -> str:
+    async def agendar(fecha: str, zona: str, nombre: str, pedido: str, preferencia_horario: str = "", pieza_suelta: bool = False) -> str:
         extra = f" — horario preferido: {preferencia_horario}" if preferencia_horario else ""
         acciones.append(f"📅 Agendaría la entrega ({fecha}, {zona}, {nombre}): {pedido}{extra}")
         return f"OK: agendada para {fecha} en {zona}. Dile al cliente que quedo agendada y que un companero le confirma la existencia."
@@ -728,6 +730,16 @@ async def panel_practica_mensaje(request: Request):
         acciones.append(f"📋 Mandaría la LISTA de días para {zona}: " + ", ".join(f["title"] for f in d["filas"]))
         return "OK: se enviara la lista de dias al cliente. Escribe como maximo una frase muy corta, o nada."
 
+    async def lista_rutas_p() -> str:
+        items = await rutas_con_pedido_grande(fecha_hoy_iso())
+        if not items:
+            acciones.append("📋 No hay rutas con pedido grande agendado")
+            return ("No hay ninguna ruta con pedido grande agendado en los proximos dias. Dile al cliente que una pieza suelta "
+                    "solo se entrega cuando ya vamos a su zona con otro pedido y ofrecele agregar otro juguete o que el equipo le avisa.")
+        d = interactivo.lista_rutas(items)
+        acciones.append("📋 Mandaría la LISTA de rutas ya programadas: " + ", ".join(f["title"] for f in d["filas"]))
+        return "OK: se enviara la lista de rutas al cliente. Escribe como maximo una frase muy corta, o nada."
+
     texto_ia = texto
     if es_puebla and not historial:
         acciones.append("📎 Mandaría el PDF de paquetes (automático en el primer mensaje)")
@@ -741,6 +753,7 @@ async def panel_practica_mensaje(request: Request):
         video if es_puebla else None,
         lista_zonas_p if es_puebla else None,
         lista_dias_p if es_puebla else None,
+        lista_rutas_p if es_puebla else None,
     )
     return {"respuesta": respuesta, "acciones": acciones}
 

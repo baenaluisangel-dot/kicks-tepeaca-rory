@@ -154,6 +154,18 @@ HERRAMIENTA_LISTA_DIAS = {
     },
 }
 
+HERRAMIENTA_LISTA_RUTAS = {
+    "name": "enviar_lista_rutas_programadas",
+    "description": (
+        "Solo Puebla (WhatsApp). Para cuando el cliente quiere UNA SOLA PIEZA suelta (o menos de lo que "
+        "da entrega normal): manda una LISTA con los dias y zonas donde YA vamos a pasar porque hay un "
+        "pedido grande agendado. Asi se aprovecha la ruta. Si no hay ninguna, lo sabras por el "
+        "resultado. La lista ya trae la pregunta: despues escribe una frase muy corta o nada. Cuando el "
+        "cliente elija, usa agendar_entrega con pieza_suelta=true."
+    ),
+    "input_schema": {"type": "object", "properties": {}},
+}
+
 HERRAMIENTA_VER_DIAS = {
     "name": "ver_dias_entrega",
     "description": (
@@ -182,6 +194,10 @@ HERRAMIENTA_AGENDAR = {
             "zona": {"type": "string", "enum": ZONAS_PUEBLA},
             "nombre": {"type": "string"},
             "pedido": {"type": "string", "description": "Que llevara y el total, ej: 'Dúo Woody y Buzz, $1,250'."},
+            "pieza_suelta": {
+                "type": "boolean",
+                "description": "true si es una sola pieza suelta que se lleva aprovechando una ruta ya programada (viene de enviar_lista_rutas_programadas).",
+            },
             "preferencia_horario": {
                 "type": "string",
                 "description": "Opcional: si el horario de su zona no le acomoda, cuando le conviene (ej: 'despues de las 7 PM'). El equipo lo coordina.",
@@ -294,6 +310,7 @@ async def generar_respuesta(
     enviar_video=None,
     lista_zonas=None,
     lista_dias=None,
+    lista_rutas=None,
 ) -> tuple[str, bool]:
     """
     Genera una respuesta con Claude.
@@ -368,6 +385,8 @@ async def generar_respuesta(
             herramientas.append(HERRAMIENTA_LISTA_ZONAS)
         if lista_dias:
             herramientas.append(HERRAMIENTA_LISTA_DIAS)
+        if lista_rutas:
+            herramientas.append(HERRAMIENTA_LISTA_RUTAS)
         if ver_dias:
             herramientas.append(HERRAMIENTA_VER_DIAS)
         if agendar:
@@ -437,6 +456,10 @@ async def generar_respuesta(
                 resultado = await lista_zonas()
                 if resultado.startswith("OK"):
                     listas_programadas += 1
+            elif bloque.name == "enviar_lista_rutas_programadas" and lista_rutas:
+                resultado = await lista_rutas()
+                if resultado.startswith("OK"):
+                    listas_programadas += 1
             elif bloque.name == "enviar_lista_dias" and lista_dias:
                 resultado = await lista_dias((bloque.input or {}).get("zona", ""))
                 if resultado.startswith("OK"):
@@ -447,7 +470,7 @@ async def generar_respuesta(
                 d = bloque.input or {}
                 resultado = await agendar(
                     d.get("fecha", ""), d.get("zona", ""), d.get("nombre", ""), d.get("pedido", ""),
-                    d.get("preferencia_horario", ""),
+                    d.get("preferencia_horario", ""), bool(d.get("pieza_suelta", False)),
                 )
             elif bloque.name == "avisar_equipo" and avisar_equipo:
                 resultado = await avisar_equipo(

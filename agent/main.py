@@ -56,6 +56,7 @@ from agent.memory import (
     crear_entrega,
     crear_ruta,
     dias_disponibles,
+    rutas_con_pedido_grande,
     listar_avisos,
     listar_entregas,
     listar_rutas,
@@ -644,11 +645,13 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 ]
                 return "Dias disponibles en " + zona + ":\n" + "\n".join(lineas)
 
-            async def agendar_entrega(fecha: str, zona: str, nombre: str, pedido: str, preferencia_horario: str = "") -> str:
+            async def agendar_entrega(fecha: str, zona: str, nombre: str, pedido: str, preferencia_horario: str = "", pieza_suelta: bool = False) -> str:
                 """La usa Claude: agenda la entrega (por confirmar) y avisa al equipo."""
                 if preferencia_horario.strip():
                     pedido = f"{pedido} — Horario preferido: {preferencia_horario.strip()}"
-                ok, detalle = await crear_entrega(msg.telefono, fecha, zona, nombre, pedido, fecha_hoy_iso())
+                ok, detalle = await crear_entrega(msg.telefono, fecha, zona, nombre, pedido, fecha_hoy_iso(), pieza_suelta)
+                if pieza_suelta and ok:
+                    pedido = f"{pedido} [PIEZA SUELTA: se lleva aprovechando la ruta]"
                 if not ok:
                     return f"ERROR: {detalle} Vuelve a llamar ver_dias_entrega y ofrece otro dia."
                 await marcar_necesita_persona(msg.telefono, True, f"Entrega {fecha} {zona}: {pedido}")
@@ -679,6 +682,16 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 lista_pendiente["datos"] = interactivo.lista_dias(zona, dias)
                 return "OK: se enviara la lista de dias al cliente. Escribe como maximo una frase muy corta, o nada."
 
+            async def lista_rutas_tool() -> str:
+                """La usa Claude para una pieza suelta: dias y zonas donde ya vamos a pasar."""
+                items = await rutas_con_pedido_grande(fecha_hoy_iso())
+                if not items:
+                    return ("No hay ninguna ruta con pedido grande agendado en los proximos dias. Dile al cliente que "
+                            "una pieza suelta solo se entrega cuando ya vamos a su zona con otro pedido y ofrecele "
+                            "agregar otro juguete (con 2 o mas se agenda normal) o que el equipo le avisa cuando haya ruta.")
+                lista_pendiente["datos"] = interactivo.lista_rutas(items)
+                return "OK: se enviara la lista de rutas al cliente. Escribe como maximo una frase muy corta, o nada."
+
             respuesta, es_respuesta_real = await generar_respuesta(
                 texto_para_ia,
                 historial,
@@ -694,6 +707,7 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 enviar_video if es_puebla else None,
                 lista_zonas_tool if es_puebla else None,
                 lista_dias_tool if es_puebla else None,
+                lista_rutas_tool if es_puebla else None,
             )
 
             enviado = await proveedor.enviar_mensaje(msg.telefono, respuesta, msg.contexto) if respuesta else True
