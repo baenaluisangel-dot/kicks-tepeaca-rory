@@ -686,12 +686,18 @@ async def panel_practica_mensaje(request: Request):
         acciones.append(f"🎬 Mandaría el video de {nombre}")
         return f"OK: video de {nombre} enviado."
 
-    async def catalogo() -> str:
-        acciones.append("📎 Mandaría el PDF del catálogo")
+    async def catalogo(tipo: str = "") -> str:
+        acciones.append("📎 Mandaría el PDF del catálogo de " + ("juguetes de Kicks" if (tipo == "juguetes" or not es_puebla) else "paquetes"))
         return "OK: catalogo en PDF enviado."
 
     async def avisar(motivo: str, tipo: str = "otro") -> str:
+        if tipo in ("duda_producto", "fuera_de_catalogo"):
+            acciones.append(f"📝 Solo lo anotaría en el panel, sin molestarte ({tipo}): {motivo}")
+            return ("OK: anotado en el panel. No se pausa la conversacion. Dile al cliente en una frase "
+                    "que lo confirmas mas tarde con el equipo y sigue ayudandolo con lo demas.")
         acciones.append(f"🔔 Te avisaría ({tipo}): {motivo}")
+        if tipo == "pedido":
+            return "OK: el equipo quedo avisado del pedido. Sigue atendiendo al cliente."
         return "OK: el equipo quedo avisado. Dile al cliente que un companero le contesta por este chat."
 
     async def ver_dias(zona: str) -> str:

@@ -47,6 +47,8 @@ from agent.memory import (
     marcar_necesita_persona,
     necesita_persona,
     borrar_ejemplo,
+    guardar_contexto_dueno,
+    obtener_contexto_dueno,
     borrar_ruta,
     guardar_ejemplo,
     listar_ejemplos,
@@ -217,6 +219,7 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
         if msg.es_propio:
             await _atender_mensaje_del_equipo(msg)
             continue
+        await _recordar_chat_del_dueno(msg)
         es_audio = bool(msg.contexto.get("audio_url")) and not msg.texto.strip()
         if not msg.texto.strip() and not es_audio:
             continue
@@ -238,6 +241,28 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
             encolados += 1
 
     return {"status": "ok", "encolados": encolados}
+
+
+async def avisar_dueno(texto: str):
+    """Avisa al dueño por WhatsApp si su chat esta abierto (ventana de 24 h); si no, por Telegram."""
+    tel = (os.getenv("OWNER_WHATSAPP") or "").strip().lstrip("+")
+    if tel and proveedor is not None:
+        try:
+            ctx = await obtener_contexto_dueno()
+            if ctx and await proveedor.enviar_mensaje(tel, texto, ctx):
+                return
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"No se pudo avisar al dueño por WhatsApp: {e}")
+    await avisar_por_telegram(texto)
+
+
+async def _recordar_chat_del_dueno(msg: MensajeEntrante):
+    """Cuando el dueño escribe desde su numero, guarda su chat para poder avisarle por WhatsApp
+    (WhatsApp solo deja escribir libremente dentro de las 24 h del ultimo mensaje del usuario)."""
+    tel = (os.getenv("OWNER_WHATSAPP") or "").strip().lstrip("+")
+    if tel and msg.telefono == tel and msg.contexto.get("conversation_id"):
+        await guardar_contexto_dueno({k: v for k, v in msg.contexto.items()
+                                      if k in ("conversation_id", "account_id", "plataforma", "cuenta_zernio")})
 
 
 async def _transcribir_y_aceptar(msg: MensajeEntrante):
@@ -281,7 +306,7 @@ async def _aceptar_mensaje(msg: MensajeEntrante) -> bool:
         if await necesita_persona(msg.telefono) and ahora - _ultimo_recordatorio.get(msg.telefono, -1e9) > 600:
             _ultimo_recordatorio[msg.telefono] = ahora
             plat = msg.contexto.get("plataforma", "whatsapp")
-            await avisar_por_telegram(
+            await avisar_dueno(
                 f"💬 Un cliente que espera a una persona volvió a escribir.\n"
                 f"Cliente: {enlace_cliente(msg.telefono, plat)}\nMensaje: {msg.texto[:300]}"
             )
@@ -458,8 +483,6 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 producto = obtener_producto(producto_id)
                 if not producto:
                     return f"ERROR: no existe el producto '{producto_id}'."
-                if es_puebla and not producto_id.startswith("toy-story"):
-                    return "ERROR: en Puebla solo se muestran productos de Toy Story."
                 rutas = producto.get("fotos") or []
                 if not rutas:
                     return "ERROR: ese producto no tiene fotos. Ofrece que el equipo se las manda."
@@ -529,16 +552,17 @@ async def procesar_mensaje(msg: MensajeEntrante):
                     return f"OK: video de {video} enviado."
                 return "ERROR: no se pudo enviar el video. Ofrece que el equipo se lo manda."
 
-            async def enviar_catalogo() -> str:
+            async def enviar_catalogo(tipo: str = "") -> str:
                 """La usa Claude (herramienta enviar_catalogo) para mandar el PDF del catalogo."""
-                url = url_paquetes_pdf() if es_puebla else url_catalogo_pdf()
-                archivo = ARCHIVO_PAQUETES_PDF if es_puebla else ARCHIVO_CATALOGO_PDF
+                paquetes = es_puebla and tipo != "juguetes"
+                url = url_paquetes_pdf() if paquetes else url_catalogo_pdf()
+                archivo = ARCHIVO_PAQUETES_PDF if paquetes else ARCHIVO_CATALOGO_PDF
                 if not url:
                     return "ERROR: no hay URL publica configurada para el catalogo."
                 # Se manda el PDF como archivo (en Instagram tambien). Si Instagram lo
                 # rechaza, se cae al enlace como ultimo recurso.
                 # En Instagram el pie de foto sale como un globo aparte (ruido): sin texto.
-                pie = "Catálogo de paquetes Toy Story 🎁" if es_puebla else "Catálogo de juguetes de Kicks Tepeaca 🎁"
+                pie = "Catálogo de paquetes Toy Story 🎁" if paquetes else "Catálogo de juguetes de Kicks 🎁"
                 ok = await proveedor.enviar_documento(
                     msg.telefono,
                     url,
@@ -557,7 +581,7 @@ async def procesar_mensaje(msg: MensajeEntrante):
                         msg.contexto,
                     )
                 if ok:
-                    fotos_mandadas.append("el catálogo de paquetes en PDF" if es_puebla else "el catálogo de juguetes en PDF")
+                    fotos_mandadas.append("el catálogo de paquetes en PDF" if paquetes else "el catálogo de juguetes en PDF")
                     return "OK: catalogo en PDF enviado."
                 return "ERROR: no se pudo enviar el PDF. Ofrece que el equipo se lo manda."
 
@@ -584,19 +608,28 @@ async def procesar_mensaje(msg: MensajeEntrante):
                     )
 
             async def avisar_equipo(motivo: str, tipo: str = "otro") -> str:
-                """La usa Claude: deja la conversacion marcada para una persona y pausa a Rory."""
-                await marcar_necesita_persona(msg.telefono, True, motivo)
+                """La usa Claude. Dudas y cosas fuera de catalogo solo se anotan; pedidos, quejas y
+                casos que necesitan una persona avisan al dueño (y las quejas pausan a Rory)."""
                 await registrar_aviso(msg.telefono, tipo, motivo)
-                await pausar(msg.telefono, HORAS_PAUSA_AVISO)
-                logger.info(f"{msg.telefono}: necesita persona ({tipo}) — {motivo}")
-                icono = {"pedido": "🟢 PEDIDO LISTO", "duda_producto": "🟠 Duda de producto",
-                         "fuera_de_catalogo": "🟡 Pide algo que no tenemos", "queja_o_problema": "🔴 Queja o problema"
-                         }.get(tipo, "🔵 Necesita apoyo")
-                await avisar_por_telegram(
+                silencioso = tipo in ("duda_producto", "fuera_de_catalogo")
+                if silencioso:
+                    logger.info(f"{msg.telefono}: anotado ({tipo}) — {motivo}")
+                    return ("OK: anotado en el panel. No se pausa la conversacion. Dile al cliente en una frase "
+                            "que lo confirmas mas tarde con el equipo y sigue ayudandolo con lo demas.")
+                await marcar_necesita_persona(msg.telefono, True, motivo)
+                pausa = tipo in ("queja_o_problema", "otro")
+                if pausa:
+                    await pausar(msg.telefono, HORAS_PAUSA_AVISO)
+                logger.info(f"{msg.telefono}: necesita atencion ({tipo}) — {motivo}")
+                icono = {"pedido": "🟢 PEDIDO POR CONFIRMAR", "queja_o_problema": "🔴 Necesito que atiendas a un cliente"
+                         }.get(tipo, "🔵 Un cliente necesita a una persona")
+                await avisar_dueno(
                     f"{icono}\nCliente: {enlace_cliente(msg.telefono, plataforma)}\n"
                     f"Motivo: {motivo}\nÚltimo mensaje: {msg.texto[:300]}"
                 )
-                return "OK: el equipo quedo avisado. Dile al cliente que un companero le contesta por este chat."
+                if pausa:
+                    return "OK: el equipo quedo avisado. Dile al cliente que un companero le contesta por este chat."
+                return "OK: el equipo quedo avisado del pedido. Sigue atendiendo al cliente."
 
             async def ver_dias_entrega(zona: str) -> str:
                 """La usa Claude: dias de entrega abiertos para la zona del cliente."""
@@ -621,7 +654,7 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 await marcar_necesita_persona(msg.telefono, True, f"Entrega {fecha} {zona}: {pedido}")
                 await registrar_aviso(msg.telefono, "pedido", f"Entrega agendada {fecha} en {zona} — {nombre}: {pedido}")
                 logger.info(f"{msg.telefono}: entrega agendada {fecha} {zona}")
-                await avisar_por_telegram(
+                await avisar_dueno(
                     f"🟢 ENTREGA AGENDADA (por confirmar existencia)\n"
                     f"{fecha_bonita(fecha)} · {zona} · {detalle or ''}\n"
                     f"Cliente: {nombre} — {enlace_cliente(msg.telefono, plataforma)}\nPedido: {pedido}"

@@ -79,7 +79,20 @@ HERRAMIENTA_CATALOGO = {
         "catalogo, la lista completa, 'todo lo que tienen' o ver todos los juguetes. "
         "Mandalo una sola vez por conversacion salvo que lo pidan de nuevo."
     ),
-    "input_schema": {"type": "object", "properties": {}},
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tipo": {
+                "type": "string",
+                "enum": ["paquetes", "juguetes"],
+                "description": (
+                    "Solo campana de Puebla: 'paquetes' = catalogo de paquetes Toy Story; 'juguetes' = "
+                    "catalogo general de juguetes de Kicks (cuando pidan otros juguetes). En Instagram y "
+                    "Facebook se manda siempre el de juguetes."
+                ),
+            }
+        },
+    },
 }
 
 
@@ -181,11 +194,12 @@ HERRAMIENTA_AGENDAR = {
 HERRAMIENTA_EQUIPO = {
     "name": "avisar_equipo",
     "description": (
-        "Marca esta conversacion para que una persona del equipo la atienda y pausa a Rory "
-        "en ella. Usala cuando el cliente ya eligio que quiere comprar o apartar, pide hablar "
-        "con una persona, hay una queja o un problema, quiere colaborar o algo que no puedes "
-        "resolver. Despues de usarla, avisale al cliente en una frase que un companero del "
-        "equipo le contesta por este chat."
+        "Deja una nota para el equipo. Segun el tipo: 'queja_o_problema' y 'otro' pausan a Rory y "
+        "avisan a una persona (usalos solo si de verdad hace falta un humano: queja, problema, "
+        "pago, el cliente pide hablar con una persona). 'pedido' avisa que hay un pedido por "
+        "confirmar (sin pausar). 'duda_producto' y 'fuera_de_catalogo' solo quedan anotados en el "
+        "panel: NO pausan ni molestan, y debes seguir atendiendo al cliente. Despues de usarla, "
+        "dile al cliente en una frase lo que corresponda (por ejemplo que lo confirmas mas tarde)."
     ),
     "input_schema": {
         "type": "object",
@@ -408,7 +422,7 @@ async def generar_respuesta(
                 if resultado.startswith("OK"):
                     fotos_enviadas += 1
             elif bloque.name == "enviar_catalogo" and enviar_catalogo:
-                resultado = await enviar_catalogo()
+                resultado = await enviar_catalogo((bloque.input or {}).get("tipo", ""))
                 if resultado.startswith("OK"):
                     fotos_enviadas += 1
             elif bloque.name == "enviar_fotos_paquete" and enviar_fotos_paquete:

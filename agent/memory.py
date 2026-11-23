@@ -427,6 +427,36 @@ def config_ruta_defecto() -> dict:
     return {"dias": [0, 1, 3, 5, 6], "paradas": paradas, "anticipacion_dias": 1, "semanas": 3, "bloqueados": []}
 
 
+async def guardar_contexto_dueno(contexto: dict):
+    """Guarda el chat del dueño (conversation_id, account_id...) y cuando escribio por ultima vez."""
+    import json
+    datos = {"contexto": contexto, "ts": ahora().isoformat()}
+    async with async_session() as session:
+        fila = await session.get(Configuracion, "dueno_ctx")
+        if fila:
+            fila.valor = json.dumps(datos)
+        else:
+            session.add(Configuracion(clave="dueno_ctx", valor=json.dumps(datos)))
+        await session.commit()
+
+
+async def obtener_contexto_dueno(max_horas: float = 23.0) -> dict | None:
+    """El chat del dueño, solo si escribio hace menos de ~24 h (si no, WhatsApp no deja escribirle)."""
+    import json
+    async with async_session() as session:
+        fila = await session.get(Configuracion, "dueno_ctx")
+    if not fila:
+        return None
+    try:
+        datos = json.loads(fila.valor)
+        ts = datetime.fromisoformat(datos["ts"])
+    except (ValueError, KeyError):
+        return None
+    if ahora() - ts > timedelta(hours=max_horas):
+        return None
+    return datos.get("contexto")
+
+
 async def obtener_config_ruta() -> dict:
     import json
     defecto = config_ruta_defecto()
