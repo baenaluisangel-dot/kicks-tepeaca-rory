@@ -407,35 +407,129 @@ async def listar_rutas(desde_fecha: str) -> list[dict]:
     return salida
 
 
+class Configuracion(Base):
+    """Ajustes guardados como JSON (por ejemplo la ruta semanal de entregas)."""
+
+    __tablename__ = "configuracion"
+
+    clave: Mapped[str] = mapped_column(String(50), primary_key=True)
+    valor: Mapped[str] = mapped_column(Text, default="{}")
+
+
+ORDEN_RUTA = ["Amozoc", "Valsequillo", "CU", "Peri Plaza", "Angelópolis", "Centro", "CAPU"]
+
+
+def config_ruta_defecto() -> dict:
+    """La ruta habitual: una zona por hora desde la 1 PM; lunes, martes, jueves, sabado y domingo."""
+    paradas = []
+    for n, zona in enumerate(ORDEN_RUTA):
+        paradas.append({"zona": zona, "inicio": f"{13 + n:02d}:00", "fin": f"{14 + n:02d}:00", "cupo": 3})
+    return {"dias": [0, 1, 3, 5, 6], "paradas": paradas, "anticipacion_dias": 1, "semanas": 3, "bloqueados": []}
+
+
+async def obtener_config_ruta() -> dict:
+    import json
+    defecto = config_ruta_defecto()
+    async with async_session() as session:
+        fila = await session.get(Configuracion, "ruta_semanal")
+    if not fila:
+        return defecto
+    try:
+        guardada = json.loads(fila.valor)
+    except ValueError:
+        return defecto
+    return {**defecto, **{k: v for k, v in guardada.items() if k in defecto}}
+
+
+async def guardar_config_ruta(cfg: dict):
+    import json
+    async with async_session() as session:
+        fila = await session.get(Configuracion, "ruta_semanal")
+        if fila:
+            fila.valor = json.dumps(cfg, ensure_ascii=False)
+        else:
+            session.add(Configuracion(clave="ruta_semanal", valor=json.dumps(cfg, ensure_ascii=False)))
+        await session.commit()
+
+
+def fechas_de_ruta(cfg: dict, hoy_iso: str) -> list[str]:
+    """Fechas futuras en las que hay ruta (dias de la semana elegidos, sin bloqueados)."""
+    from datetime import date, timedelta
+    inicio = date.fromisoformat(hoy_iso) + timedelta(days=int(cfg.get("anticipacion_dias", 1)))
+    salida = []
+    for n in range(int(cfg.get("semanas", 3)) * 7):
+        d = inicio + timedelta(days=n)
+        if d.weekday() in cfg.get("dias", []) and d.isoformat() not in cfg.get("bloqueados", []):
+            salida.append(d.isoformat())
+    return salida
+
+
+async def listar_agenda(hoy_iso: str) -> list[dict]:
+    """Por cada dia de ruta: sus paradas (zona, horario, cupo) con las entregas agendadas."""
+    cfg = await obtener_config_ruta()
+    fechas = fechas_de_ruta(cfg, hoy_iso)
+    if not fechas:
+        return []
+    async with async_session() as session:
+        ents = (await session.execute(
+            select(Entrega).where(Entrega.fecha.in_(fechas), Entrega.estado != "cancelada").order_by(Entrega.id)
+        )).scalars().all()
+    agenda = []
+    for f in fechas:
+        paradas = []
+        for p in cfg["paradas"]:
+            z = _sin_acentos(p["zona"])
+            lista = [e for e in ents if e.fecha == f and _sin_acentos(e.zona) == z]
+            paradas.append({
+                "zona": p["zona"], "horario": f"{p['inicio']} a {p['fin']}", "cupo": p["cupo"],
+                "ocupados": len(lista),
+                "entregas": [{"id": e.id, "telefono": e.telefono, "nombre": e.nombre, "pedido": e.pedido, "estado": e.estado} for e in lista],
+            })
+        agenda.append({"fecha": f, "paradas": paradas})
+    return agenda
+
+
 async def dias_disponibles(zona: str, desde_fecha: str) -> list[dict]:
-    """Rutas futuras que cubren la zona y todavia tienen lugar."""
+    """Dias futuros con lugar para la zona: la ruta semanal mas los dias extra abiertos a mano."""
     z = _sin_acentos(zona)
-    return [
-        {"fecha": r["fecha"], "horario": r["horario"], "quedan": r["cupo"] - r["ocupados"]}
-        for r in await listar_rutas(desde_fecha)
-        if any(_sin_acentos(x) == z for x in r["zonas"]) and r["cupo"] > r["ocupados"]
-    ]
+    cfg = await obtener_config_ruta()
+    salida: dict[str, dict] = {}
+    parada = next((p for p in cfg["paradas"] if _sin_acentos(p["zona"]) == z), None)
+    if parada:
+        fechas = fechas_de_ruta(cfg, desde_fecha)
+        if fechas:
+            async with async_session() as session:
+                ents = (await session.execute(
+                    select(Entrega).where(Entrega.fecha.in_(fechas), Entrega.estado != "cancelada")
+                )).scalars().all()
+            for f in fechas:
+                usados = sum(1 for e in ents if e.fecha == f and _sin_acentos(e.zona) == z)
+                if parada["cupo"] > usados:
+                    salida[f] = {"fecha": f, "horario": f"{parada['inicio']} a {parada['fin']}", "quedan": parada["cupo"] - usados}
+    # Dias extra abiertos a mano (por ejemplo un dia fuera de la ruta)
+    for r in await listar_rutas(desde_fecha):
+        if r["fecha"] in salida:
+            continue
+        if any(_sin_acentos(x) == z for x in r["zonas"]) and r["cupo"] > r["ocupados"]:
+            salida[r["fecha"]] = {"fecha": r["fecha"], "horario": r["horario"], "quedan": r["cupo"] - r["ocupados"]}
+    return [salida[k] for k in sorted(salida)]
 
 
 async def crear_entrega(telefono: str, fecha: str, zona: str, nombre: str, pedido: str, desde_fecha: str) -> tuple[bool, str]:
-    """Agenda la entrega si ese dia cubre la zona y hay lugar. Devuelve (ok, mensaje)."""
-    z = _sin_acentos(zona)
+    """Agenda la entrega si ese dia hay ruta para la zona y queda lugar. Devuelve (ok, mensaje)."""
+    disp = next((d for d in await dias_disponibles(zona, desde_fecha) if d["fecha"] == fecha), None)
+    if not disp:
+        return False, "Ese dia no hay entregas para esa zona o ya se lleno."
     async with async_session() as session:
-        rutas = (await session.execute(select(Ruta).where(Ruta.fecha == fecha))).scalars().all()
-        ruta = next((r for r in rutas if fecha >= desde_fecha and any(_sin_acentos(x) == z for x in r.zonas.split(","))), None)
-        if not ruta:
-            return False, "Ese dia no hay entregas para esa zona."
-        if await _ocupados(session, fecha) >= ruta.cupo:
-            return False, "Ese dia ya se lleno."
         ya = (await session.execute(select(Entrega).where(
             Entrega.telefono == telefono, Entrega.fecha == fecha, Entrega.estado != "cancelada"
         ))).scalars().first()
         if ya:
-            return True, "Ya estaba agendada para ese dia."
+            return True, disp["horario"]
         session.add(Entrega(telefono=telefono, fecha=fecha, zona=zona[:40], nombre=nombre[:100],
                             pedido=pedido[:600], estado="por_confirmar", creado_en=ahora()))
         await session.commit()
-    return True, ruta.horario
+    return True, disp["horario"]
 
 
 async def listar_entregas(desde_fecha: str) -> list[dict]:

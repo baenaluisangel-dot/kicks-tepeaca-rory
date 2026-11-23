@@ -27,7 +27,10 @@ from agent.memory import (
     crear_ruta,
     dias_disponibles,
     guardar_ejemplo,
+    guardar_config_ruta,
+    listar_agenda,
     listar_atencion,
+    obtener_config_ruta,
     listar_ejemplos,
     listar_entregas,
     listar_rutas,
@@ -413,50 +416,144 @@ async def panel_chat_ejemplo(request: Request):
 
 # ── Entregas ─────────────────────────────────────────────────────────────────
 
+def _entrega_html(token: str, e: dict) -> str:
+    confirmada = e["estado"] == "confirmada"
+    return (
+        f'<div class="ent"><span class="badge {"ok" if confirmada else "warn"}">{"Confirmada" if confirmada else "Por confirmar"}</span>'
+        f'<span><b>{html.escape(e["nombre"])}</b> · {html.escape(e["pedido"])}</span>'
+        f'<a class="btn" href="/panel/chat?token={quote(token)}&tel={quote(e["telefono"])}">Ver chat</a>'
+        + ("" if confirmada else _boton(token, "/panel/entrega", {"id": e["id"], "estado": "confirmada"}, "Confirmar", "pri", "/panel/entregas"))
+        + _boton(token, "/panel/entrega", {"id": e["id"], "estado": "cancelada"}, "Cancelar", "bad", "/panel/entregas")
+        + "</div>"
+    )
+
+
 @router.get("/panel/entregas", response_class=HTMLResponse)
 async def panel_entregas(token: str = "", ok: str = ""):
     _exigir(token)
     hoy = fecha_hoy_iso()
+    cfg = await obtener_config_ruta()
+    agenda = await listar_agenda(hoy)
     rutas = await listar_rutas(hoy)
     entregas = await listar_entregas(hoy)
     por_fecha: dict[str, list] = {}
     for e in entregas:
         por_fecha.setdefault(e["fecha"], []).append(e)
 
-    dias = ""
-    for r in rutas:
-        pct = min(100, round(100 * r["ocupados"] / r["cupo"])) if r["cupo"] else 0
-        det = ""
-        for e in por_fecha.get(r["fecha"], []):
-            confirmada = e["estado"] == "confirmada"
-            det += (
-                f'<div class="ent"><span class="badge {"ok" if confirmada else "warn"}">{"Confirmada" if confirmada else "Por confirmar"}</span>'
-                f'<span><b>{html.escape(e["nombre"])}</b> · {html.escape(e["zona"])} · {html.escape(e["pedido"])}</span>'
-                f'<a class="btn" href="/panel/chat?token={quote(token)}&tel={quote(e["telefono"])}">Ver chat</a>'
-                + ("" if confirmada else _boton(token, "/panel/entrega", {"id": e["id"], "estado": "confirmada"}, "Confirmar", "pri", "/panel/entregas"))
-                + _boton(token, "/panel/entrega", {"id": e["id"], "estado": "cancelada"}, "Cancelar", "bad", "/panel/entregas")
-                + "</div>"
+    # --- agenda de la ruta semanal: un recuadro por dia, con sus paradas
+    tarjetas = ""
+    for dia in agenda[:14]:
+        total = sum(p["ocupados"] for p in dia["paradas"])
+        filas = ""
+        libres = ""
+        for p in dia["paradas"]:
+            if not p["ocupados"]:
+                libres += f'<span class="chip">{html.escape(p["horario"].split(" a ")[0])} {html.escape(p["zona"])} · 0/{p["cupo"]}</span>'
+                continue
+            pct = min(100, round(100 * p["ocupados"] / p["cupo"])) if p["cupo"] else 0
+            filas += (
+                f'<div class="ent"><span class="chip">{html.escape(p["horario"])}</span><b>{html.escape(p["zona"])}</b>'
+                f'<span class="mut small">{p["ocupados"]} de {p["cupo"]}</span>'
+                f'<div class="bar-cupo" style="flex:1;min-width:60px;margin:0"><i style="width:{pct}%"></i></div></div>'
             )
+            for e in p["entregas"]:
+                filas += _entrega_html(token, e)
+        if libres:
+            filas += f'<div class="chips" style="margin-top:6px">{libres}</div>'
+        tarjetas += (f'<div class="card dia"><h3>{fecha_bonita(dia["fecha"])} <span class="mut small">· {total} entrega(s)</span></h3>{filas}</div>')
+    tarjetas = f'<div class="grid">{tarjetas}</div>' if tarjetas else '<div class="card empty">No hay días en la ruta. Elige los días de la semana abajo.</div>'
+
+    # --- editor de la ruta semanal
+    nombres_dia = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+    dias_chk = "".join(
+        f'<label class="chip"><input type="checkbox" name="dias" value="{i}" {"checked" if i in cfg["dias"] else ""}>{n}</label>'
+        for i, n in enumerate(nombres_dia)
+    )
+    filas_paradas = ""
+    for n, p in enumerate(cfg["paradas"]):
+        filas_paradas += (
+            f'<div class="toolbar" style="margin:4px 0"><b style="width:110px">{n + 1}. {html.escape(p["zona"])}</b>'
+            f'<input type="hidden" name="zona_{n}" value="{html.escape(p["zona"], quote=True)}">'
+            f'<label class="mut small">de <input type="time" name="inicio_{n}" value="{p["inicio"]}"></label>'
+            f'<label class="mut small">a <input type="time" name="fin_{n}" value="{p["fin"]}"></label>'
+            f'<label class="mut small">entregas <input type="number" name="cupo_{n}" value="{p["cupo"]}" min="1" style="width:70px"></label></div>'
+        )
+    bloq = ", ".join(cfg.get("bloqueados", []))
+    editor = (
+        f'<div class="card"><form method="post" action="/panel/ruta-semanal"><input type="hidden" name="token" value="{html.escape(token, quote=True)}">'
+        f'<p class="mut small" style="margin:0 0 6px">Días de la semana con ruta:</p><div class="chips">{dias_chk}</div>'
+        f'<p class="mut small" style="margin:14px 0 4px">Paradas, en orden de recorrido (cada zona tiene su hora y cuántas entregas caben):</p>{filas_paradas}'
+        f'<div class="toolbar" style="margin-top:12px"><label class="mut small">Anticipación mínima (días) <input type="number" name="anticipacion" value="{cfg["anticipacion_dias"]}" min="0" max="14" style="width:70px"></label>'
+        f'<label class="mut small">Semanas que se ofrecen <input type="number" name="semanas" value="{cfg["semanas"]}" min="1" max="8" style="width:70px"></label></div>'
+        f'<p class="mut small" style="margin:8px 0 4px">Días sin ruta (separados por coma, formato AAAA-MM-DD):</p>'
+        f'<input type="text" name="bloqueados" value="{html.escape(bloq, quote=True)}" placeholder="2026-12-25, 2027-01-01" style="width:100%">'
+        f'<div class="acts"><button class="pri">Guardar ruta</button></div></form></div>'
+    )
+
+    # --- dias extra abiertos a mano
+    dias_extra = ""
+    for r in rutas:
+        det = "".join(_entrega_html(token, e) for e in por_fecha.get(r["fecha"], []))
         zonas = "".join(f'<span class="chip">{html.escape(z)}</span>' for z in r["zonas"])
-        dias += (
+        dias_extra += (
             f'<div class="card dia"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3>{fecha_bonita(r["fecha"])}</h3>'
             + _boton(token, "/panel/ruta/borrar", {"id": r["id"]}, "Quitar día", "bad", "/panel/entregas") + "</div>"
-            f'<div class="chips">{zonas}</div><div class="mut small">🕐 {html.escape(r["horario"] or "Horario por confirmar")} · {r["ocupados"]} de {r["cupo"]} entregas</div>'
-            f'<div class="bar-cupo"><i style="width:{pct}%"></i></div>{det}</div>'
+            f'<div class="chips">{zonas}</div><div class="mut small">🕐 {html.escape(r["horario"] or "Horario por confirmar")} · {r["ocupados"]} de {r["cupo"]} entregas</div>{det}</div>'
         )
-    dias = f'<div class="grid">{dias}</div>' if dias else '<div class="card empty">No hay días abiertos. Abre uno abajo y Rory empezará a ofrecerlo a los clientes de esa zona.</div>'
-
+    dias_extra = f'<div class="grid">{dias_extra}</div>' if dias_extra else ""
     checks = "".join(f'<label class="chip"><input type="checkbox" name="zonas" value="{z}">{z}</label>' for z in ZONAS_PUEBLA)
-    form = (
+    form_extra = (
         f'<div class="card"><form method="post" action="/panel/ruta"><input type="hidden" name="token" value="{html.escape(token, quote=True)}">'
         f'<div class="toolbar"><label>Fecha<br><input type="date" name="fecha" required></label>'
         f'<label>Horario<br><input type="text" name="horario" placeholder="12:00 a 18:00" size="16"></label>'
         f'<label>Entregas que caben<br><input type="number" name="cupo" value="6" min="1" style="width:90px"></label></div>'
         f'<p class="mut small" style="margin:6px 0">Zonas que cubres ese día:</p><div class="chips">{checks}</div>'
-        f'<div class="acts"><button class="pri">Abrir día de entregas</button></div></form></div>'
+        f'<div class="acts"><button class="pri">Abrir día extra</button></div></form></div>'
     )
-    return pagina(token, "entregas", "Entregas", "<h2 style='margin-top:0'>Días abiertos</h2>" + dias + "<h2>Abrir un día nuevo</h2>" + form, ok,
-                  subtitulo="Tú abres los días y las zonas; Rory solo ofrece esos días y agenda las entregas (por confirmar).")
+    cuerpo = (
+        "<h2 style='margin-top:0'>Agenda de la ruta</h2>" + tarjetas
+        + "<h2>Mi ruta semanal</h2>" + editor
+        + "<h2>Días extra (fuera de la ruta)</h2>" + dias_extra + form_extra
+    )
+    return pagina(token, "entregas", "Entregas", cuerpo, ok,
+                  subtitulo="Rory ofrece solo los días y horarios de tu ruta (y los días extra que abras) y agenda las entregas por confirmar.")
+
+
+@router.post("/panel/ruta-semanal")
+async def panel_ruta_semanal(request: Request):
+    form = await request.form()
+    token = str(form.get("token", ""))
+    _exigir(token)
+    actual = await obtener_config_ruta()
+    paradas = []
+    for n, p in enumerate(actual["paradas"]):
+        try:
+            inicio = str(form.get(f"inicio_{n}") or p["inicio"])
+            fin = str(form.get(f"fin_{n}") or p["fin"])
+            for hh in (inicio, fin):
+                h, m = hh.split(":")
+                assert 0 <= int(h) < 24 and 0 <= int(m) < 60
+            cupo = max(1, int(form.get(f"cupo_{n}") or p["cupo"]))
+        except (ValueError, AssertionError):
+            return RedirectResponse(f"/panel/entregas?token={quote(token)}&ok={quote('Revisa las horas y los cupos')}", status_code=303)
+        paradas.append({"zona": p["zona"], "inicio": inicio, "fin": fin, "cupo": cupo})
+    dias = sorted({int(d) for d in form.getlist("dias") if str(d).isdigit() and 0 <= int(d) <= 6})
+    bloqueados = []
+    for t in str(form.get("bloqueados", "")).replace(";", ",").split(","):
+        t = t.strip()
+        if t:
+            try:
+                date.fromisoformat(t)
+                bloqueados.append(t)
+            except ValueError:
+                pass
+    try:
+        antic = min(14, max(0, int(form.get("anticipacion") or 1)))
+        semanas = min(8, max(1, int(form.get("semanas") or 3)))
+    except ValueError:
+        antic, semanas = 1, 3
+    await guardar_config_ruta({"dias": dias, "paradas": paradas, "anticipacion_dias": antic, "semanas": semanas, "bloqueados": bloqueados})
+    return RedirectResponse(f"/panel/entregas?token={quote(token)}&ok={quote('Ruta guardada: Rory ya ofrece estos días y horarios')}", status_code=303)
 
 
 @router.post("/panel/ruta")
