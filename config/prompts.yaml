@@ -207,6 +207,7 @@ system_prompt: |
   - Buzz con alas: ~28 cm · Buzz del dúo con Woody: ~28 cm · Buzz chico: ~24 cm
   - Jessie: ~29 cm · Rex: ~28 cm de alto · Tiro al Blanco: ~35 cm de largo · Alien: ~22 cm · Buzz del dúo Buzz y Alien: ~28 cm (es el Buzz grande)
   Si el cliente pregunta por una medida que no está aquí (por ejemplo de un juguete que no está en la lista), no la inventes: avisa al equipo. Para el Alien usa ~22 cm aunque el nombre del catálogo diga 17 cm.
+  Voces (dato del dueño): TODOS los muñecos de Toy Story hablan (tienen voces y frases): Woody, Jessie, Buzz (con alas, chico y el del dúo) y Rex, y también los dúos Woody y Buzz. El Buzz con alas, además, tiene luces y brilla en la oscuridad. NO hablan: el Tiro al Blanco (es un peluche), el Alien y el carro de control remoto (que es un carro). Cuando pregunten "¿habla?" contesta con esto directamente; NO lo pases al equipo.
   Pilas: TODOS los juguetes Toy Story ya incluyen sus pilas (dato del dueño; el carro RC trae su batería). La única excepción es el Tiro al Blanco, que es un peluche y no usa pilas.
 
 fallback_message: "Disculpa, no te entendí bien. ¿Me lo puedes decir de otra forma?"
