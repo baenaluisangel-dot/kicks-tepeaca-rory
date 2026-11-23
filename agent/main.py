@@ -72,6 +72,7 @@ from agent.memory import (
     marcar_evento_procesado,
     obtener_historial,
 )
+from agent.audio import transcribir
 from agent.notificar import avisar_por_telegram, enlace_cliente
 from agent.panel import bucle_resumen_diario, fecha_bonita, fecha_hoy_iso, router as panel_router
 from agent.providers import obtener_proveedor
@@ -215,7 +216,8 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
         if msg.es_propio:
             await _atender_mensaje_del_equipo(msg)
             continue
-        if not msg.texto.strip():
+        es_audio = bool(msg.contexto.get("audio_url")) and not msg.texto.strip()
+        if not msg.texto.strip() and not es_audio:
             continue
 
         # La entrega es "al menos una vez": el mismo evento puede llegar dos veces
@@ -224,40 +226,69 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
             logger.info(f"Evento repetido, se ignora: {evento_id}")
             continue
 
-        # Instagram a veces entrega el mismo mensaje dos veces con ids distintos (sobre
-        # todo el predeterminado de los anuncios). Mismo cliente + mismo texto en menos
-        # de 60 s = duplicado, no se contesta dos veces.
-        ahora = time.monotonic()
-        clave = (msg.telefono, msg.texto.strip().lower())
-        if ahora - _ultimos_textos.get(clave, -1e9) < 60:
-            logger.info(f"Mensaje duplicado de {msg.telefono}, se ignora")
-            continue
-        _ultimos_textos[clave] = ahora
-        if len(_ultimos_textos) > 2000:
-            for k in [k for k, t in _ultimos_textos.items() if ahora - t > 60]:
-                _ultimos_textos.pop(k, None)
-
-        await registrar_mensaje_cliente(
-            msg.telefono, msg.contexto.get("plataforma", "whatsapp"), msg.texto
-        )
-        if await esta_pausada(msg.telefono):
-            logger.info(f"Mensaje de {msg.telefono} sin contestar: Rory esta en pausa ahi")
-            # El cliente sigue escribiendo y esta esperando a una persona: recordatorio
-            # (maximo uno cada 10 minutos por cliente).
-            if await necesita_persona(msg.telefono) and ahora - _ultimo_recordatorio.get(msg.telefono, -1e9) > 600:
-                _ultimo_recordatorio[msg.telefono] = ahora
-                plat = msg.contexto.get("plataforma", "whatsapp")
-                await avisar_por_telegram(
-                    f"💬 Un cliente que espera a una persona volvió a escribir.\n"
-                    f"Cliente: {enlace_cliente(msg.telefono, plat)}\nMensaje: {msg.texto[:300]}"
-                )
+        if es_audio:
+            # Hay que bajar el audio YA (Meta lo borra despues de un rato) y transcribirlo:
+            # se hace en segundo plano para contestar el webhook a tiempo.
+            logger.info(f"Nota de voz de {msg.telefono}: se transcribe")
+            asyncio.create_task(_transcribir_y_aceptar(msg))
             continue
 
-        logger.info(f"Mensaje de {msg.telefono}: {msg.texto}")
-        await _encolar(msg)
-        encolados += 1
+        if await _aceptar_mensaje(msg):
+            encolados += 1
 
     return {"status": "ok", "encolados": encolados}
+
+
+async def _transcribir_y_aceptar(msg: MensajeEntrante):
+    """Baja la nota de voz, la transcribe y sigue el camino normal de un mensaje de texto."""
+    try:
+        datos = await proveedor.descargar_adjunto(msg.contexto["audio_url"], msg.contexto)
+        texto = await transcribir(datos) if datos else None
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error transcribiendo la nota de voz de {msg.telefono}: {e}")
+        texto = None
+    if texto:
+        logger.info(f"Nota de voz de {msg.telefono} transcrita ({len(texto)} letras)")
+        msg.texto = f"[Nota de voz del cliente, transcrita]: {texto}"
+    else:
+        msg.texto = "[El cliente mandó un archivo, foto o nota de voz que no se puede leer]"
+    await _aceptar_mensaje(msg)
+
+
+async def _aceptar_mensaje(msg: MensajeEntrante) -> bool:
+    """Deduplica por texto, registra el mensaje y lo encola (o avisa si Rory esta en pausa)."""
+    # Instagram a veces entrega el mismo mensaje dos veces con ids distintos (sobre
+    # todo el predeterminado de los anuncios). Mismo cliente + mismo texto en menos
+    # de 60 s = duplicado, no se contesta dos veces.
+    ahora = time.monotonic()
+    clave = (msg.telefono, msg.texto.strip().lower())
+    if ahora - _ultimos_textos.get(clave, -1e9) < 60:
+        logger.info(f"Mensaje duplicado de {msg.telefono}, se ignora")
+        return False
+    _ultimos_textos[clave] = ahora
+    if len(_ultimos_textos) > 2000:
+        for k in [k for k, t in _ultimos_textos.items() if ahora - t > 60]:
+            _ultimos_textos.pop(k, None)
+
+    await registrar_mensaje_cliente(
+        msg.telefono, msg.contexto.get("plataforma", "whatsapp"), msg.texto
+    )
+    if await esta_pausada(msg.telefono):
+        logger.info(f"Mensaje de {msg.telefono} sin contestar: Rory esta en pausa ahi")
+        # El cliente sigue escribiendo y esta esperando a una persona: recordatorio
+        # (maximo uno cada 10 minutos por cliente).
+        if await necesita_persona(msg.telefono) and ahora - _ultimo_recordatorio.get(msg.telefono, -1e9) > 600:
+            _ultimo_recordatorio[msg.telefono] = ahora
+            plat = msg.contexto.get("plataforma", "whatsapp")
+            await avisar_por_telegram(
+                f"💬 Un cliente que espera a una persona volvió a escribir.\n"
+                f"Cliente: {enlace_cliente(msg.telefono, plat)}\nMensaje: {msg.texto[:300]}"
+            )
+        return False
+
+    logger.info(f"Mensaje de {msg.telefono}: {msg.texto}")
+    await _encolar(msg)
+    return True
 
 
 _RE_PAUSA = re.compile(

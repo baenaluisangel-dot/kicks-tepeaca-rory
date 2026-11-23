@@ -160,6 +160,15 @@ class ProveedorZernio(ProveedorWhatsApp):
 
         cuenta = payload.get("account") or {}
 
+        # Nota de voz de WhatsApp: viene como adjunto de tipo "audio" (con o sin texto)
+        audio_url = ""
+        if plataforma == "whatsapp":
+            for adj in mensaje.get("attachments") or []:
+                if isinstance(adj, dict) and (adj.get("type") == "audio" or (adj.get("payload") or {}).get("voice")):
+                    audio_url = adj.get("url") or ""
+                    logger.info(f"Adjunto de audio: campos {sorted(adj.keys())} | payload {sorted((adj.get('payload') or {}).keys())}")
+                    break
+
         return [
             MensajeEntrante(
                 telefono=telefono,
@@ -173,6 +182,7 @@ class ProveedorZernio(ProveedorWhatsApp):
                     "account_id": cuenta.get("accountId") or cuenta.get("id", ""),
                     "plataforma": plataforma,
                     "referral": str(referral)[:500],
+                    "audio_url": audio_url,
                     "cuenta_zernio": getattr(request.state, "zernio_cuenta", 1),
                 },
             )
@@ -393,6 +403,24 @@ class ProveedorZernio(ProveedorWhatsApp):
             return True
         logger.error(f"Zernio rechazo la imagen [{r.status_code}]: {r.text[:500]}")
         return False
+
+    async def descargar_adjunto(self, url: str, contexto: dict | None = None) -> bytes | None:
+        """Baja un adjunto entrante. Los de WhatsApp pasan por Zernio y piden la API key."""
+        headers = {}
+        if url.startswith(self.base_url) or "zernio.com" in url:
+            api_key = self._api_key(contexto or {})
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as cliente:
+                r = await cliente.get(url, headers=headers)
+        except httpx.HTTPError as e:
+            logger.error(f"No se pudo bajar el adjunto: {type(e).__name__}")
+            return None
+        if r.status_code != 200:
+            logger.error(f"No se pudo bajar el adjunto [{r.status_code}]: {r.text[:200]}")
+            return None
+        return r.content
 
     async def enviar_audio(self, telefono: str, url: str, contexto: dict | None = None) -> bool:
         """Manda una nota de voz (OGG/Opus mono). Se intenta como nota de voz de WhatsApp y, si
