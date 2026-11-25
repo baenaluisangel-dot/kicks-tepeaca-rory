@@ -670,6 +670,33 @@ async def borrar_ejemplo(ejemplo_id: int):
         await session.commit()
 
 
+class Etiqueta(Base):
+    """Lo que Claude entendio de una conversacion: que queria, que dudo, por que se enfrio."""
+
+    __tablename__ = "etiquetas"
+
+    telefono: Mapped[str] = mapped_column(String(50), primary_key=True)
+    canal: Mapped[str] = mapped_column(String(20), default="whatsapp")
+    productos: Mapped[str] = mapped_column(Text, default="[]")   # JSON: lista de nombres
+    dudas: Mapped[str] = mapped_column(Text, default="[]")       # JSON: categorias fijas
+    objecion: Mapped[str] = mapped_column(String(40), default="ninguna")
+    resultado: Mapped[str] = mapped_column(String(30), default="en_curso")
+    frases: Mapped[str] = mapped_column(Text, default="[]")      # JSON: frases textuales del cliente
+    ultimo_msg_id: Mapped[int] = mapped_column(Integer, default=0)
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
+
+
+class Informe(Base):
+    """Un informe de 'Voz del cliente': numeros exactos + recomendaciones de Claude."""
+
+    __tablename__ = "informes_voz"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
+    dias: Mapped[int] = mapped_column(Integer, default=7)
+    datos: Mapped[str] = mapped_column(Text, default="{}")       # JSON con metricas y sintesis
+
+
 async def inicializar_db():
     """Crea las tablas si no existen y agrega las columnas nuevas a las tablas que ya existian."""
     async with engine.begin() as conn:

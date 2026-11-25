@@ -79,6 +79,7 @@ from agent.memory import (
 from agent import interactivo
 from agent.audio import transcribir
 from agent.notificar import avisar_por_telegram, enlace_cliente
+from agent.voz import bucle_voz_semanal
 from agent.panel import bucle_resumen_diario, fecha_bonita, fecha_hoy_iso, router as panel_router
 from agent.providers import obtener_proveedor
 from agent.providers.base import MensajeEntrante
@@ -127,6 +128,7 @@ async def lifespan(app: FastAPI):
     logger.info("Base de datos lista")
     await recuperar_pendientes()
     asyncio.create_task(bucle_resumen_diario())
+    asyncio.create_task(bucle_voz_semanal())
     logger.info(f"Servidor AgentKit escuchando en el puerto {PORT}")
 
     global estado_proveedor

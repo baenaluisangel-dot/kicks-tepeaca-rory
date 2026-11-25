@@ -17,7 +17,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from agent import interactivo
+from agent import interactivo, voz
 from agent.brain import generar_respuesta
 from agent.catalogo import VIDEOS_TOY_STORY, ZONAS_PUEBLA, obtener_producto
 from agent.memory import (
@@ -188,7 +188,8 @@ details summary{cursor:pointer;color:var(--acc);font-size:13px;margin-top:6px}de
 """
 
 NAV = [("resumen", "Resumen", "/panel"), ("conversaciones", "Conversaciones", "/panel/conversaciones"),
-       ("entregas", "Entregas", "/panel/entregas"), ("practica", "Practicar con Rory", "/panel/practica")]
+       ("entregas", "Entregas", "/panel/entregas"), ("voz", "Voz del cliente", "/panel/voz"),
+       ("practica", "Practicar con Rory", "/panel/practica")]
 
 
 def pagina(token: str, activo: str, titulo: str, cuerpo: str, ok: str = "", extra_head: str = "", subtitulo: str = "") -> HTMLResponse:
@@ -779,3 +780,105 @@ async def panel_practica_borrar(request: Request):
     except ValueError:
         pass
     return _volver(form, "/panel/practica", token, "Ejemplo quitado")
+
+
+# ── Voz del cliente ──────────────────────────────────────────────────────────
+
+def _barras(items: list, nombres: dict | None = None) -> str:
+    if not items:
+        return '<div class="empty small">Aún no hay datos.</div>'
+    tope = max(v for _, v in items) or 1
+    filas = ""
+    for k, v in items:
+        nombre = (nombres or {}).get(k, k)
+        filas += (f'<div style="margin:7px 0"><div style="display:flex;justify-content:space-between;gap:10px">'
+                  f'<span>{html.escape(str(nombre))}</span><b>{v}</b></div>'
+                  f'<div class="bar-cupo"><i style="width:{round(100 * v / tope)}%"></i></div></div>')
+    return filas
+
+
+def _ideas(titulo: str, icono: str, ideas: list) -> str:
+    if not ideas:
+        return ""
+    cuerpo = "".join(
+        f'<li style="margin:10px 0"><b>{html.escape(i.get("idea", ""))}</b>'
+        f'<div class="mut small">{html.escape(i.get("evidencia", ""))}</div></li>' for i in ideas)
+    return f'<div class="card"><h3 style="margin:0 0 4px">{icono} {titulo}</h3><ul style="margin:0;padding-left:18px">{cuerpo}</ul></div>'
+
+
+@router.get("/panel/voz", response_class=HTMLResponse)
+async def panel_voz(token: str = "", ok: str = ""):
+    _exigir(token)
+    est = voz.estado
+    ultimo = await voz.ultimo_informe()
+    acciones = _boton(token, "/panel/voz/analizar", {}, "Analizar ahora", "pri", "/panel/voz")
+    acciones += f' <a class="btn" href="/panel/voz/exportar?token={quote(token)}">Descargar CSV</a>'
+    if est["activo"]:
+        avance = f'{est["hechas"]}/{est["total"]}' if est["total"] else ""
+        aviso = (f'<div class="card" style="margin-bottom:12px">⏳ {html.escape(est["etapa"])} {avance} · '
+                 f'la página se actualiza sola.</div><script>setTimeout(()=>location.reload(),5000)</script>')
+        acciones = ""
+    elif est["error"]:
+        aviso = f'<div class="card stat alert" style="margin-bottom:12px">No se pudo analizar: {html.escape(est["error"])}</div>'
+    else:
+        aviso = ""
+    cuerpo = f'{aviso}<div class="toolbar">{acciones}</div>'
+    if not ultimo:
+        cuerpo += ('<div class="card empty">Todavía no hay informe. Pulsa “Analizar ahora”: Rory lee las conversaciones '
+                   'calmadas y arma las recomendaciones. Cada domingo a las 8 PM se hace solo y te llega un resumen por Telegram.</div>')
+        return pagina(token, "voz", "Voz del cliente", cuerpo, ok, subtitulo="Lo que piden tus clientes, convertido en ideas para anuncios, videos y productos")
+    creado, c = ultimo
+    m, s = c.get("metricas", {}), c.get("sintesis", {})
+    nuevas = sum(x["nuevas"] for x in m.get("por_canal_nuevas", {}).values())
+    res = dict(m.get("resultados", []))
+    cuerpo += (
+        '<div class="grid stats">'
+        f'<div class="card stat"><div class="n">{m.get("conversaciones_analizadas", 0)}</div><div class="t">Conversaciones analizadas</div></div>'
+        f'<div class="card stat"><div class="n">{nuevas}</div><div class="t">Conversaciones nuevas ({m.get("dias", 7)} días)</div></div>'
+        f'<div class="card stat"><div class="n">{m.get("entregas_agendadas", 0)}</div><div class="t">Entregas agendadas</div></div>'
+        f'<div class="card stat"><div class="n">{res.get("se_enfrio", 0)}</div><div class="t">Se enfriaron</div></div></div>')
+    if c.get("muestra_chica"):
+        cuerpo += '<div class="card" style="margin-top:12px">⚠️ Hay pocas conversaciones analizadas: tómalo como pista, no como regla.</div>'
+    if s.get("resumen"):
+        cuerpo += f'<h2>Lo más importante</h2><div class="card">{html.escape(s["resumen"])}</div>'
+    ideas = (_ideas("Copies para anuncios", "🎯", s.get("ideas_copy", [])) + _ideas("Videos por grabar", "🎬", s.get("videos", []))
+             + _ideas("Productos", "🧸", s.get("productos", [])) + _ideas("Cómo vender mejor", "💬", s.get("ventas", [])))
+    if ideas:
+        cuerpo += f'<h2>Recomendaciones</h2><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">{ideas}</div>'
+    cuerpo += (
+        '<h2>Los números</h2><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">'
+        f'<div class="card"><h3 style="margin:0">Qué preguntan</h3>{_barras(m.get("dudas", []), voz.NOMBRES_DUDA)}</div>'
+        f'<div class="card"><h3 style="margin:0">Por qué no avanzan</h3>{_barras(m.get("objeciones", []), voz.NOMBRES_OBJECION)}</div>'
+        f'<div class="card"><h3 style="margin:0">Productos más pedidos</h3>{_barras(m.get("productos_mas_pedidos", []))}</div>'
+        f'<div class="card"><h3 style="margin:0">Cómo terminan</h3>{_barras(m.get("resultados", []), voz.NOMBRES_RESULTADO)}</div>'
+        f'<div class="card"><h3 style="margin:0">Entregas por zona</h3>{_barras(m.get("entregas_por_zona", []))}</div>'
+        f'<div class="card"><h3 style="margin:0">Paquetes agendados</h3>{_barras(m.get("paquetes_agendados", []))}</div></div>')
+    sin = m.get("pidieron_algo_que_no_tenemos", [])
+    if sin:
+        cuerpo += '<h2>Pidieron algo que no tenemos</h2><div class="card"><ul style="margin:0;padding-left:18px">' + "".join(
+            f"<li>{html.escape(x)}</li>" for x in sin[:15]) + "</ul></div>"
+    frases = m.get("frases_de_clientes", [])
+    if frases:
+        cuerpo += '<h2>Así escriben tus clientes</h2><div class="grid">' + "".join(
+            f'<div class="quote">“{html.escape(f)}”</div>' for f in frases[:12]) + "</div>"
+    sub = f'Informe del {fecha_bonita(creado.astimezone(zona_mx()).strftime("%Y-%m-%d"))} · últimos {m.get("dias", 7)} días'
+    return pagina(token, "voz", "Voz del cliente", cuerpo, ok, subtitulo=sub)
+
+
+@router.post("/panel/voz/analizar")
+async def panel_voz_analizar(request: Request):
+    form = await request.form()
+    token = str(form.get("token") or "")
+    _exigir(token)
+    if voz.estado["activo"]:
+        return _volver(form, "/panel/voz", token, "Ya hay un análisis en marcha")
+    asyncio.create_task(voz.analizar(7))
+    return _volver(form, "/panel/voz", token, "Analizando las conversaciones…")
+
+
+@router.get("/panel/voz/exportar")
+async def panel_voz_exportar(token: str = ""):
+    _exigir(token)
+    from fastapi.responses import Response
+    return Response(await voz.exportar_csv(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": "attachment; filename=voz-del-cliente.csv"})
