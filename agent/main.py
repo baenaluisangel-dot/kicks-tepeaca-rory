@@ -10,6 +10,7 @@ import asyncio
 import logging
 import html
 import random
+from datetime import timedelta
 import re
 import time
 import os
@@ -40,6 +41,7 @@ from agent.catalogo import (
 from agent.memory import (
     guardar_mensaje,
     guardar_origen,
+    agenda_reciente,
     borrar_pendientes,
     cargar_pendientes,
     esta_pausada,
@@ -77,7 +79,7 @@ from agent.memory import (
     marcar_evento_procesado,
     obtener_historial,
 )
-from agent import interactivo
+from agent import calendario, interactivo
 from agent.audio import transcribir
 from agent.notificar import avisar_por_telegram, enlace_cliente
 from agent.voz import bucle_voz_semanal
@@ -363,6 +365,12 @@ async def _atender_mensaje_del_equipo(msg: MensajeEntrante):
 # del equipo entra a la conversacion, no contesta.
 DELAY_MIN = float(os.getenv("RESPUESTA_DELAY_MIN") or "120")
 DELAY_MAX = float(os.getenv("RESPUESTA_DELAY_MAX") or "240")
+# Cuando ya se esta acordando la entrega, esperar tanto confunde: se contesta mas rapido.
+DELAY_AGENDA_MIN = float(os.getenv("RESPUESTA_DELAY_AGENDA_MIN") or "30")
+DELAY_AGENDA_MAX = float(os.getenv("RESPUESTA_DELAY_AGENDA_MAX") or "60")
+_RE_AGENDA = re.compile(
+    r"\b(hoy|mañana|manana|entreg\w*|horario|zona|ubicaci\w*|d[oó]nde|a qu[eé] hora|elijo el)\b", re.I
+)
 _pendientes: dict[str, list[MensajeEntrante]] = {}
 _trabajadores: dict[str, asyncio.Task] = {}
 
@@ -418,11 +426,31 @@ def _texto_del_lote(lote: list) -> str:
     return "[El cliente mandó un archivo, foto o nota de voz que no se puede leer]"
 
 
+async def _esperar_para_contestar(telefono: str, minimo: float, maximo: float):
+    """Espera como una persona; si se esta hablando de la entrega, la espera se acorta."""
+    reloj = asyncio.get_running_loop().time
+    inicio = reloj()
+    limite = inicio + random.uniform(minimo, maximo)
+    corto = inicio + random.uniform(DELAY_AGENDA_MIN, max(DELAY_AGENDA_MIN, DELAY_AGENDA_MAX))
+    try:
+        en_agenda = await agenda_reciente(telefono)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"No se pudo revisar si habia agenda en curso: {e}")
+        en_agenda = False
+    while (resta := limite - reloj()) > 0:
+        if corto < limite and (en_agenda or any(_RE_AGENDA.search(m.texto) for m in _pendientes.get(telefono, []))):
+            # Al menos 10 s mas, por si el cliente sigue escribiendo
+            limite = min(limite, max(corto, reloj() + 10))
+            corto = limite
+            continue
+        await asyncio.sleep(min(5, resta))
+
+
 async def _trabajador(telefono: str):
     try:
         while _pendientes.get(telefono):
             lo, hi = _espera_recuperado.pop(telefono, (DELAY_MIN, max(DELAY_MIN, DELAY_MAX)))
-            await asyncio.sleep(random.uniform(lo, hi))
+            await _esperar_para_contestar(telefono, lo, hi)
             lote = _pendientes.pop(telefono, [])
             desde = _primer_pendiente.pop(telefono, None)
             ids_lote = [m.contexto.get("_pend_id") for m in lote if m.contexto.get("_pend_id")]
@@ -636,6 +664,8 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 logger.info(f"{msg.telefono}: necesita atencion ({tipo}) — {motivo}")
                 icono = {"pedido": "🟢 PEDIDO POR CONFIRMAR", "queja_o_problema": "🔴 Necesito que atiendas a un cliente"
                          }.get(tipo, "🔵 Un cliente necesita a una persona")
+                if motivo.startswith("URGENTE"):
+                    icono = "🚨🚨 URGENTE: contesta ya, el cliente espera respuesta"
                 await avisar_dueno(
                     f"{icono}\nCliente: {enlace_cliente(msg.telefono, plataforma)}\n"
                     f"Motivo: {motivo}\nÚltimo mensaje: {msg.texto[:300]}"
@@ -690,7 +720,7 @@ async def procesar_mensaje(msg: MensajeEntrante):
             async def lista_zonas_tool() -> str:
                 """La usa Claude: programa la lista de zonas (se manda despues de su texto)."""
                 lista_pendiente["datos"] = interactivo.lista_zonas()
-                return "OK: se enviara la lista de zonas al cliente. Escribe como maximo una frase muy corta, o nada."
+                return "OK: se enviara la lista de zonas al cliente. Si hay preguntas sin contestar, contestalas todas en tu texto; si no, escribe una frase muy corta o nada."
 
             async def lista_dias_tool(zona: str) -> str:
                 """La usa Claude: programa la lista de dias de entrega abiertos para la zona."""
@@ -699,7 +729,12 @@ async def procesar_mensaje(msg: MensajeEntrante):
                     return ("No hay dias de entrega abiertos para esa zona por ahora. Usa avisar_equipo "
                             "con tipo 'pedido' y dile al cliente que el equipo le confirma el dia.")
                 lista_pendiente["datos"] = interactivo.lista_dias(zona, dias)
-                return "OK: se enviara la lista de dias al cliente. Escribe como maximo una frase muy corta, o nada."
+                manana = (calendario.ahora_mx().date() + timedelta(days=1))
+                aviso = ("" if any(d["fecha"] == manana.isoformat() for d in dias) else
+                         f" OJO: MAÑANA ({calendario.nombre_dia(manana)}) NO hay entrega en {zona}; si el cliente "
+                         "pidio mañana, dilo claro en tu texto.")
+                return ("OK: se enviara la lista de dias al cliente. Si hay preguntas sin contestar, contestalas "
+                        "todas en tu texto; si no, escribe una frase muy corta o nada." + aviso)
 
             async def lista_rutas_tool() -> str:
                 """La usa Claude para una pieza suelta: dias y zonas donde ya vamos a pasar."""
@@ -709,7 +744,7 @@ async def procesar_mensaje(msg: MensajeEntrante):
                             "una pieza suelta solo se entrega cuando ya vamos a su zona con otro pedido y ofrecele "
                             "agregar otro juguete (con 2 o mas se agenda normal) o que el equipo le avisa cuando haya ruta.")
                 lista_pendiente["datos"] = interactivo.lista_rutas(items)
-                return "OK: se enviara la lista de rutas al cliente. Escribe como maximo una frase muy corta, o nada."
+                return "OK: se enviara la lista de rutas al cliente. Si hay preguntas sin contestar, contestalas todas en tu texto; si no, escribe una frase muy corta o nada."
 
             respuesta, es_respuesta_real = await generar_respuesta(
                 texto_para_ia,

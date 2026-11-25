@@ -13,6 +13,7 @@ import yaml
 from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 
+from agent.calendario import texto_calendario
 from agent.catalogo import PAQUETES_PUEBLA, VIDEOS_TOY_STORY, ZONAS_PUEBLA, ids_validos
 
 load_dotenv()
@@ -231,6 +232,13 @@ HERRAMIENTA_EQUIPO = {
                     "queja_o_problema = queja, pago, comprobante; otro = lo demas."
                 ),
             },
+            "urgente": {
+                "type": "boolean",
+                "description": (
+                    "true cuando no puede esperar: el cliente solo puede HOY o MAÑANA (o un dia sin "
+                    "entregas) y hay que decidir si se le puede entregar."
+                ),
+            },
         },
         "required": ["motivo", "tipo"],
     },
@@ -369,6 +377,10 @@ async def generar_respuesta(
             if e.get("nota"):
                 bloque += f"(Nota: {e['nota']})\n"
         system_prompt += bloque
+    try:
+        system_prompt += "\n\n" + await texto_calendario(modo)
+    except Exception as e:  # noqa: BLE001 — sin calendario Rory contesta igual
+        logger.error(f"No se pudo armar el calendario: {e}")
     extras = {"output_config": {"effort": ESFUERZO}} if (_soporta_esfuerzo and ESFUERZO) else {}
 
     async def _llamar(parametros_extra: dict):
@@ -473,9 +485,11 @@ async def generar_respuesta(
                     d.get("preferencia_horario", ""), bool(d.get("pieza_suelta", False)),
                 )
             elif bloque.name == "avisar_equipo" and avisar_equipo:
-                resultado = await avisar_equipo(
-                    (bloque.input or {}).get("motivo", ""), (bloque.input or {}).get("tipo", "otro")
-                )
+                d = bloque.input or {}
+                motivo = d.get("motivo", "")
+                if d.get("urgente"):
+                    motivo = f"URGENTE: {motivo}"
+                resultado = await avisar_equipo(motivo, d.get("tipo", "otro"))
             else:
                 resultado = "Herramienta no disponible."
             resultados.append(

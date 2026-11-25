@@ -726,6 +726,16 @@ class Venta(Base):
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
 
 
+async def agenda_reciente(telefono: str, minutos: int = 20) -> bool:
+    """True si en los ultimos minutos Rory mando listas de entrega o agendo con este cliente."""
+    async with async_session() as session:
+        textos = (await session.execute(
+            select(Mensaje.content).where(Mensaje.telefono == telefono, Mensaje.role == "assistant",
+                                          Mensaje.timestamp >= ahora() - timedelta(minutes=minutos))
+        )).scalars().all()
+    return any(marca in t for t in textos for marca in ("lista de zonas", "lista de días", "lista de rutas", "agendada"))
+
+
 async def guardar_origen(telefono: str, canal: str, anuncio: dict):
     """Guarda de que anuncio vino. El mismo cliente con el mismo anuncio no se repite."""
     anuncio_id, titulo = anuncio.get("anuncio_id", ""), anuncio.get("titulo", "")
