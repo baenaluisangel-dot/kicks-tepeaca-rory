@@ -697,6 +697,123 @@ class Informe(Base):
     datos: Mapped[str] = mapped_column(Text, default="{}")       # JSON con metricas y sintesis
 
 
+class Origen(Base):
+    """El anuncio por el que escribio un cliente (una fila por cliente y anuncio)."""
+
+    __tablename__ = "origenes_anuncio"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telefono: Mapped[str] = mapped_column(String(50), index=True)
+    canal: Mapped[str] = mapped_column(String(20), default="whatsapp")
+    anuncio_id: Mapped[str] = mapped_column(String(100), default="", index=True)
+    titulo: Mapped[str] = mapped_column(Text, default="")
+    texto: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str] = mapped_column(Text, default="")
+    datos: Mapped[str] = mapped_column(Text, default="{}")       # lo que mando Meta, completo
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
+
+
+class Venta(Base):
+    """Una venta cobrada, registrada por el equipo en el panel."""
+
+    __tablename__ = "ventas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telefono: Mapped[str] = mapped_column(String(50), index=True)
+    monto: Mapped[int] = mapped_column(Integer)                   # pesos
+    productos: Mapped[str] = mapped_column(Text, default="")
+    entrega_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
+
+
+async def guardar_origen(telefono: str, canal: str, anuncio: dict):
+    """Guarda de que anuncio vino. El mismo cliente con el mismo anuncio no se repite."""
+    anuncio_id, titulo = anuncio.get("anuncio_id", ""), anuncio.get("titulo", "")
+    async with async_session() as session:
+        previas = (await session.execute(select(Origen).where(Origen.telefono == telefono))).scalars().all()
+        for p in previas:
+            if (anuncio_id and p.anuncio_id == anuncio_id) or (not anuncio_id and p.datos == anuncio.get("datos")):
+                # Llego en dos partes: se completa lo que faltaba
+                for campo in ("titulo", "texto", "url"):
+                    if not getattr(p, campo) and anuncio.get(campo):
+                        setattr(p, campo, anuncio[campo])
+                await session.commit()
+                return
+        session.add(Origen(telefono=telefono, canal=canal, anuncio_id=anuncio_id, titulo=titulo,
+                           texto=anuncio.get("texto", ""), url=anuncio.get("url", ""),
+                           datos=anuncio.get("datos", "{}"), creado_en=ahora()))
+        await session.commit()
+
+
+async def origenes_de(telefono: str) -> list[dict]:
+    async with async_session() as session:
+        filas = (await session.execute(
+            select(Origen).where(Origen.telefono == telefono).order_by(Origen.id)
+        )).scalars().all()
+    return [{"anuncio_id": f.anuncio_id, "titulo": f.titulo, "texto": f.texto, "url": f.url,
+             "creado_en": f.creado_en} for f in filas]
+
+
+async def entregas_sin_venta(desde_fecha: str, hasta_fecha: str, telefono: str | None = None) -> list[dict]:
+    """Entregas de ese rango (no canceladas) que todavia no tienen venta registrada."""
+    async with async_session() as session:
+        vendidas = select(Venta.entrega_id).where(Venta.entrega_id.is_not(None))
+        q = select(Entrega).where(Entrega.fecha >= desde_fecha, Entrega.fecha <= hasta_fecha,
+                                  Entrega.estado != "cancelada", Entrega.id.not_in(vendidas))
+        if telefono:
+            q = q.where(Entrega.telefono == telefono)
+        filas = (await session.execute(q.order_by(Entrega.fecha, Entrega.id))).scalars().all()
+    return [{"id": f.id, "telefono": f.telefono, "fecha": f.fecha, "zona": f.zona,
+             "nombre": f.nombre, "pedido": f.pedido} for f in filas]
+
+
+async def registrar_venta(telefono: str, monto: int, productos: str = "",
+                          entrega_id: int | None = None) -> bool:
+    """Registra una venta. False si ya estaba (misma entrega, o doble clic)."""
+    async with async_session() as session:
+        if entrega_id:
+            q = select(Venta).where(Venta.entrega_id == entrega_id)
+        else:
+            q = select(Venta).where(Venta.telefono == telefono, Venta.monto == monto,
+                                    Venta.creado_en >= ahora() - timedelta(minutes=2))
+        if (await session.execute(q.limit(1))).scalar_one_or_none():
+            return False
+        session.add(Venta(telefono=telefono, monto=monto, productos=productos.strip()[:500],
+                          entrega_id=entrega_id, creado_en=ahora()))
+        await session.commit()
+    return True
+
+
+async def entrega_por_id(entrega_id: int) -> dict | None:
+    async with async_session() as session:
+        f = await session.get(Entrega, entrega_id)
+    return {"id": f.id, "telefono": f.telefono, "pedido": f.pedido} if f else None
+
+
+async def ventas_de(telefono: str) -> list[dict]:
+    async with async_session() as session:
+        filas = (await session.execute(
+            select(Venta).where(Venta.telefono == telefono).order_by(Venta.id)
+        )).scalars().all()
+    return [{"id": f.id, "monto": f.monto, "productos": f.productos, "creado_en": f.creado_en} for f in filas]
+
+
+async def borrar_venta(venta_id: int):
+    async with async_session() as session:
+        await session.execute(delete(Venta).where(Venta.id == venta_id))
+        await session.commit()
+
+
+async def total_ventas(desde: datetime) -> tuple[int, int]:
+    """(cuantas ventas, cuanto dinero) desde esa fecha."""
+    async with async_session() as session:
+        n, total = (await session.execute(
+            select(func.count(Venta.id), func.coalesce(func.sum(Venta.monto), 0))
+            .where(Venta.creado_en >= desde.astimezone(timezone.utc))
+        )).one()
+    return int(n), int(total)
+
+
 async def inicializar_db():
     """Crea las tablas si no existen y agrega las columnas nuevas a las tablas que ya existian."""
     async with engine.begin() as conn:

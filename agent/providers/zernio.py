@@ -17,6 +17,7 @@ import httpx
 from fastapi import Request
 
 from agent.interactivo import texto_de_seleccion
+from agent.anuncios import campos, extraer_anuncio
 from agent.providers.base import MensajeEntrante, ProveedorWhatsApp
 
 logger = logging.getLogger("agentkit")
@@ -129,18 +130,18 @@ class ProveedorZernio(ProveedorWhatsApp):
             or (payload.get("metadata") or {}).get("referral")
             or ""
         )
-        if plataforma in ("instagram", "facebook"):
+        anuncio = extraer_anuncio(payload.get("metadata"))
+        if anuncio:
             logger.info(
-                f"Campos del mensaje: {sorted(mensaje.keys())} | "
-                f"metadata: {sorted((payload.get('metadata') or {}).keys())} | "
-                f"referral: {'si' if referral else 'no'}"
+                f"Anuncio recibido ({plataforma}): id={anuncio['anuncio_id'] or 'sin id'} | "
+                f"{campos(payload.get('metadata'))}"
             )
 
         if plataforma == "instagram":
             # Instagram no tiene telefono: el id del usuario, con prefijo para que
             # nunca choque con un numero de WhatsApp en el historial.
             telefono = "ig:" + (remitente.get("id") or "")
-            if not texto.strip() and mensaje.get("attachments"):
+            if not texto.strip() and mensaje.get("attachments") and not anuncio:
                 # Cuando llegan de un anuncio, Instagram manda primero el anuncio/reel
                 # (sin texto) y luego el texto ("Quiero más información"). Contestar a
                 # los dos duplica la respuesta, asi que lo que viene sin texto se ignora.
@@ -148,7 +149,7 @@ class ProveedorZernio(ProveedorWhatsApp):
                 return []
         elif plataforma == "facebook":
             telefono = "fb:" + (remitente.get("id") or "")
-            if not texto.strip():
+            if not texto.strip() and not anuncio:
                 logger.info("Mensaje de Facebook sin texto (adjunto): se ignora")
                 return []
         else:
@@ -196,6 +197,7 @@ class ProveedorZernio(ProveedorWhatsApp):
                     "account_id": cuenta.get("accountId") or cuenta.get("id", ""),
                     "plataforma": plataforma,
                     "referral": str(referral)[:500],
+                    "anuncio": anuncio,
                     "audio_url": audio_url,
                     "cuenta_zernio": getattr(request.state, "zernio_cuenta", 1),
                 },

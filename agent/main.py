@@ -39,6 +39,7 @@ from agent.catalogo import (
 )
 from agent.memory import (
     guardar_mensaje,
+    guardar_origen,
     borrar_pendientes,
     cargar_pendientes,
     esta_pausada,
@@ -223,6 +224,14 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
         if msg.es_propio:
             await _atender_mensaje_del_equipo(msg)
             continue
+        if msg.contexto.get("anuncio"):
+            # Se guarda antes de filtrar: a veces los datos llegan en un mensaje sin texto.
+            # Si falla, Rory contesta igual.
+            try:
+                await guardar_origen(msg.telefono, msg.contexto.get("plataforma", "whatsapp"),
+                                     msg.contexto["anuncio"])
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"No se pudo guardar el anuncio de origen: {e}")
         await _recordar_chat_del_dueno(msg)
         es_audio = bool(msg.contexto.get("audio_url")) and not msg.texto.strip()
         if not msg.texto.strip() and not es_audio:

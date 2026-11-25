@@ -23,6 +23,13 @@ from agent.catalogo import VIDEOS_TOY_STORY, ZONAS_PUEBLA, obtener_producto
 from agent.memory import (
     borrar_ejemplo,
     borrar_ruta,
+    borrar_venta,
+    entrega_por_id,
+    entregas_sin_venta,
+    origenes_de,
+    registrar_venta,
+    total_ventas,
+    ventas_de,
     cambiar_estado_entrega,
     crear_ruta,
     dias_disponibles,
@@ -258,13 +265,16 @@ async def panel_resumen(token: str = "", ok: str = ""):
     esp = [c for c in todas if c["necesita_persona"]]
     por_confirmar = [e for e in entregas if e["estado"] == "por_confirmar"]
 
+    n_ventas, dinero = await total_ventas(desde)
+
     stats = (
         f'<div class="grid stats">'
         f'<div class="card stat"><div class="n">{nuevas}</div><div class="t">Conversaciones nuevas hoy</div></div>'
         f'<div class="card stat"><div class="n">{resp} <span class="mut small">({pct}%)</span></div><div class="t">Respondieron al saludo</div></div>'
         f'<div class="card stat"><div class="n">{len(m["avisos"])}</div><div class="t">Pasadas al equipo hoy</div></div>'
         f'<div class="card stat {"alert" if esp else ""}"><div class="n">{len(esp)}</div><div class="t">Esperando a una persona</div></div>'
-        f'<div class="card stat"><div class="n">{len(por_confirmar)}</div><div class="t">Entregas por confirmar</div></div></div>'
+        f'<div class="card stat"><div class="n">{len(por_confirmar)}</div><div class="t">Entregas por confirmar</div></div>'
+        f'<div class="card stat"><div class="n">${dinero:,}</div><div class="t">Vendido hoy ({n_ventas} venta{"" if n_ventas == 1 else "s"} registrada{"" if n_ventas == 1 else "s"})</div></div></div>'
     )
 
     tarjetas = ""
@@ -401,7 +411,8 @@ async def panel_chat(token: str = "", tel: str = "", ok: str = ""):
         + "</div>"
     )
     titulo = f"+{tel}" if tel.isdigit() else tel
-    return pagina(token, "conversaciones", f"Chat {titulo}", acciones + f'<div class="chat">{burbujas}</div>', ok,
+    ficha = _anuncio_html(await origenes_de(tel)) + _ventas_chat_html(token, tel, await ventas_de(tel))
+    return pagina(token, "conversaciones", f"Chat {titulo}", acciones + ficha + f'<div class="chat">{burbujas}</div>', ok,
                   subtitulo=estado)
 
 
@@ -414,6 +425,124 @@ async def panel_chat_ejemplo(request: Request):
                           str(form.get("respuesta", "")), str(form.get("nota", "")))
     tel = str(form.get("tel", ""))
     return RedirectResponse(f"/panel/chat?token={quote(token)}&tel={quote(tel)}&ok={quote('Ejemplo guardado: Rory lo usará')}", status_code=303)
+
+
+# ── Anuncio de origen y ventas ───────────────────────────────────────────────
+
+DIAS_POR_COBRAR = 21
+
+
+def _anuncio_html(origenes: list) -> str:
+    if not origenes:
+        return ""
+    filas = ""
+    for o in origenes:
+        titulo = o["titulo"] or (f"Anuncio {o['anuncio_id']}" if o["anuncio_id"] else "Anuncio sin nombre")
+        enlace = (f' · <a href="{html.escape(o["url"], quote=True)}" target="_blank" rel="noopener">Verlo</a>'
+                  if o["url"].startswith("https://") else "")
+        detalle = f'<div class="mut small">{html.escape(o["texto"][:200])}</div>' if o["texto"] else ""
+        numero = f' <span class="mut small">· ID {html.escape(o["anuncio_id"])}</span>' if o["anuncio_id"] else ""
+        cuando = _aware(o["creado_en"]).astimezone(zona_mx()).strftime("%d/%m %H:%M")
+        filas += (f'<div style="margin-top:6px">📣 <b>{html.escape(titulo)}</b>{numero}'
+                  f' <span class="mut small">· {cuando}</span>{enlace}{detalle}</div>')
+    return f'<div class="card" style="margin-bottom:12px"><span class="mut small">Llegó por este anuncio</span>{filas}</div>'
+
+
+def _forma_venta(token: str, tel: str, volver: str, entrega_id: int | None = None) -> str:
+    extra = f'<input type="hidden" name="entrega_id" value="{entrega_id}">' if entrega_id else (
+        '<input type="text" name="productos" placeholder="Qué compró (opcional)" style="flex:1;min-width:160px">')
+    return (
+        f'<form method="post" action="/panel/venta" class="toolbar" style="margin:0">'
+        f'<input type="hidden" name="token" value="{html.escape(token, quote=True)}">'
+        f'<input type="hidden" name="telefono" value="{html.escape(tel, quote=True)}">'
+        f'<input type="hidden" name="volver" value="{html.escape(volver, quote=True)}">'
+        f'<input type="number" name="monto" min="1" max="200000" step="1" required placeholder="$ cobrado" style="width:120px">'
+        f'{extra}<button class="pri">Vendido</button></form>'
+    )
+
+
+def _ventas_chat_html(token: str, tel: str, ventas: list) -> str:
+    volver = f"/panel/chat?tel={quote(tel)}"
+    filas = ""
+    for v in ventas:
+        cuando = _aware(v["creado_en"]).astimezone(zona_mx()).strftime("%d/%m")
+        filas += (f'<div class="ent"><span class="badge ok">Venta ${v["monto"]:,}</span>'
+                  f'<span>{html.escape(v["productos"])}</span><span class="mut small">{cuando}</span>'
+                  + _boton(token, "/panel/venta/borrar", {"id": v["id"]}, "Borrar", "bad", volver) + "</div>")
+    return (f'<div class="card" style="margin-bottom:16px"><div class="mut small" style="margin-bottom:6px">'
+            f'¿Ya pagó? Anota la venta</div>{_forma_venta(token, tel, volver)}{filas}</div>')
+
+
+async def _por_cobrar_html(token: str) -> str:
+    """Entregas de hoy y de dias pasados que nadie ha marcado como vendidas."""
+    desde = (inicio_de_hoy() - timedelta(days=DIAS_POR_COBRAR)).strftime("%Y-%m-%d")
+    pendientes = await entregas_sin_venta(desde, fecha_hoy_iso())
+    if not pendientes:
+        return ""
+    filas = ""
+    for e in pendientes:
+        filas += (
+            f'<div class="ent"><span class="chip">{fecha_bonita(e["fecha"])}</span>'
+            f'<span><b>{html.escape(e["nombre"])}</b> · {html.escape(e["zona"])} · {html.escape(e["pedido"])}</span>'
+            f'<a class="btn" href="/panel/chat?token={quote(token)}&tel={quote(e["telefono"])}">Ver chat</a>'
+            + _forma_venta(token, e["telefono"], "/panel/entregas", e["id"])
+            + _boton(token, "/panel/venta/no", {"id": e["id"]}, "No se vendió", "bad", "/panel/entregas")
+            + "</div>"
+        )
+    return f'<h2>¿Se vendieron? ({len(pendientes)})</h2><div class="card">{filas}</div>'
+
+
+@router.post("/panel/venta")
+async def panel_venta(request: Request):
+    form = await request.form()
+    token = str(form.get("token", ""))
+    _exigir(token)
+    tel = str(form.get("telefono", ""))
+    try:
+        monto = round(float(str(form.get("monto", "")).replace("$", "").replace(",", "").strip()))
+        entrega_id = int(form.get("entrega_id") or 0) or None
+    except (ValueError, OverflowError):
+        return _volver(form, "/panel/entregas", token, "Escribe solo la cantidad en pesos")
+    if not tel or not 0 < monto <= 200000:
+        return _volver(form, "/panel/entregas", token, "Escribe solo la cantidad en pesos")
+    productos = str(form.get("productos", ""))
+    if entrega_id:
+        entrega = await entrega_por_id(entrega_id)
+        if not entrega or entrega["telefono"] != tel:
+            return _volver(form, "/panel/entregas", token, "No encontré esa entrega")
+        productos = entrega["pedido"]
+    else:
+        # Si se anota desde el chat y tenia una entrega por cobrar, es esa venta
+        pendientes = await entregas_sin_venta("0000-00-00", fecha_hoy_iso(), tel)
+        if pendientes:
+            entrega_id = pendientes[0]["id"]
+            productos = productos.strip() or pendientes[0]["pedido"]
+    nueva = await registrar_venta(tel, monto, productos, entrega_id)
+    return _volver(form, "/panel/entregas", token, f"Venta de ${monto:,} guardada" if nueva else "Esa venta ya estaba guardada")
+
+
+@router.post("/panel/venta/no")
+async def panel_venta_no(request: Request):
+    form = await request.form()
+    token = str(form.get("token", ""))
+    _exigir(token)
+    try:
+        await cambiar_estado_entrega(int(form.get("id") or 0), "cancelada")
+    except ValueError:
+        pass
+    return _volver(form, "/panel/entregas", token, "Anotado: no se vendió")
+
+
+@router.post("/panel/venta/borrar")
+async def panel_venta_borrar(request: Request):
+    form = await request.form()
+    token = str(form.get("token", ""))
+    _exigir(token)
+    try:
+        await borrar_venta(int(form.get("id") or 0))
+    except ValueError:
+        pass
+    return _volver(form, "/panel/entregas", token, "Venta borrada")
 
 
 # ── Entregas ─────────────────────────────────────────────────────────────────
@@ -515,7 +644,8 @@ async def panel_entregas(token: str = "", ok: str = ""):
         f'<div class="acts"><button class="pri">Abrir día extra</button></div></form></div>'
     )
     cuerpo = (
-        "<h2 style='margin-top:0'>Agenda de la ruta</h2>" + tarjetas
+        await _por_cobrar_html(token)
+        + "<h2 style='margin-top:0'>Agenda de la ruta</h2>" + tarjetas
         + "<h2>Mi ruta semanal</h2>" + editor
         + "<h2>Días extra (fuera de la ruta)</h2>" + dias_extra + form_extra
     )
