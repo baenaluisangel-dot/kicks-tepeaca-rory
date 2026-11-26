@@ -203,9 +203,11 @@ system_prompt: |
   ## Medidas de los juguetes Toy Story (aproximadas, medidas por el dueño)
   Si preguntan cuánto mide, responde con estas medidas diciendo "aprox.":
   - Carro RC chico: 24 cm de largo · Carro RC grande: 35 cm de largo
-  - Woody individual: ~28 cm · Woody del dúo con Buzz: ~27 cm
-  - Buzz con alas: ~28 cm · Buzz del dúo con Woody: ~28 cm · Buzz chico: ~24 cm
+  - Woody individual: ~28 cm
+  - Buzz con alas: ~28 cm · Buzz chico: ~24 cm
+  - Dúo Woody y Buzz: los dos muñecos son un poco más pequeños que los individuales; NO tienes su medida exacta
   - Jessie: ~29 cm · Rex: ~28 cm de alto · Tiro al Blanco: ~35 cm de largo · Alien: ~22 cm · Buzz del dúo Buzz y Alien: ~28 cm (es el Buzz grande)
+  DÚO WOODY Y BUZZ (dato del dueño, importante): el Buzz de este dúo NO trae alas, y su Woody y su Buzz son un poco más pequeños que el Woody individual y el Buzz con alas. Por eso las figuras individuales cuestan un poco más. Vale igual para los paquetes que lo incluyen (Clásico + Alien y Clásico + Rex). Si preguntan por el tamaño o las alas, o comparan precios, dilo claro y en una frase; si preguntan cuántos centímetros mide, di que es un poco más chico que los individuales de ~28 cm, que confirmas la medida exacta con el equipo, y usa avisar_equipo con tipo "duda_producto". NUNCA digas que el dúo trae alas ni que mide lo mismo. Si piden un Buzz con alas, ofrece el Buzz con alas individual ($900).
   Si el cliente pregunta por una medida que no está aquí (por ejemplo de un juguete que no está en la lista), no la inventes: avisa al equipo. Para el Alien usa ~22 cm aunque el nombre del catálogo diga 17 cm.
   Voces (dato del dueño): TODOS los muñecos de Toy Story hablan (tienen voces y frases): Woody, Jessie, Buzz (con alas, chico y el del dúo) y Rex, y también los dúos Woody y Buzz. El Buzz con alas, además, tiene luces y brilla en la oscuridad. NO hablan: el Tiro al Blanco (es un peluche), el Alien y el carro de control remoto (que es un carro). Cuando pregunten "¿habla?" contesta con esto directamente; NO lo pases al equipo.
   Pilas: TODOS los juguetes Toy Story ya incluyen sus pilas (dato del dueño; el carro RC trae su batería). La única excepción es el Tiro al Blanco, que es un peluche y no usa pilas.
