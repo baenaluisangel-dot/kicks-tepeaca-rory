@@ -712,8 +712,8 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 )
                 punto = await punto_de_entrega(zona)
                 if pieza_suelta:
-                    donde = (f" Como es una pieza suelta, sin costo si el cliente se acerca al punto de entrega: {punto} (a domicilio son $150 adicionales)."
-                             if punto else " Como es una pieza suelta, sin costo si el cliente se acerca a la zona (el equipo le confirma el punto); a domicilio son $150 adicionales.")
+                    donde = (f" Como es una pieza suelta, sin costo si el cliente se acerca al punto de entrega: {punto} (a domicilio en la ciudad de Puebla son $150 adicionales)."
+                             if punto else " Como es una pieza suelta, sin costo si el cliente se acerca a la zona (el equipo le confirma el punto); a domicilio en la ciudad de Puebla son $150 adicionales.")
                 else:
                     donde = (f" El punto de entrega de la zona es: {punto} (si pidio que se la lleven a su lugar, anotaste su referencia)."
                              if punto else "")
