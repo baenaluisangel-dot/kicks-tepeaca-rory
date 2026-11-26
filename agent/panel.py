@@ -828,8 +828,12 @@ async def panel_practica_mensaje(request: Request):
     async def avisar(motivo: str, tipo: str = "otro") -> str:
         if tipo in ("duda_producto", "fuera_de_catalogo"):
             acciones.append(f"📝 Solo lo anotaría en el panel, sin molestarte ({tipo}): {motivo}")
+            if tipo == "fuera_de_catalogo":
+                return "OK: anotado. Dile de una vez que no lo manejas, sin consultar, y ofrece lo mas parecido."
             return ("OK: anotado en el panel. No se pausa la conversacion. Dile al cliente en una frase "
-                    "que lo confirmas mas tarde con el equipo y sigue ayudandolo con lo demas.")
+                    "que lo confirmas mas tarde con el equipo y sigue ayudandolo con lo demas."
+                    " IMPORTANTE: lo que escribiste antes de usar esta herramienta NO le llega al cliente: tu mensaje final debe "
+                    "contestar primero todo lo que si sabes.")
         acciones.append(f"🔔 Te avisaría ({tipo}): {motivo}")
         if tipo == "pedido":
             return "OK: el equipo quedo avisado del pedido. Sigue atendiendo al cliente."

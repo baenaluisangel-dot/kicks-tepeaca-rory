@@ -653,10 +653,16 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 casos que necesitan una persona avisan al dueño (y las quejas pausan a Rory)."""
                 await registrar_aviso(msg.telefono, tipo, motivo)
                 silencioso = tipo in ("duda_producto", "fuera_de_catalogo")
+                if tipo == "fuera_de_catalogo":
+                    logger.info(f"{msg.telefono}: anotado ({tipo}) — {motivo}")
+                    return ("OK: anotado. Dile al cliente de una vez que ese producto no lo manejas (sin decir que lo "
+                            "vas a consultar) y ofrecele lo mas parecido del catalogo.")
                 if silencioso:
                     logger.info(f"{msg.telefono}: anotado ({tipo}) — {motivo}")
                     return ("OK: anotado en el panel. No se pausa la conversacion. Dile al cliente en una frase "
-                            "que lo confirmas mas tarde con el equipo y sigue ayudandolo con lo demas.")
+                            "que lo confirmas mas tarde con el equipo y sigue ayudandolo con lo demas."
+                            " IMPORTANTE: lo que escribiste antes de usar esta herramienta NO le llega al cliente: tu mensaje final debe "
+                            "contestar primero todo lo que si sabes.")
                 await marcar_necesita_persona(msg.telefono, True, motivo)
                 pausa = tipo in ("queja_o_problema", "otro")
                 if pausa:
@@ -706,8 +712,8 @@ async def procesar_mensaje(msg: MensajeEntrante):
                 )
                 punto = await punto_de_entrega(zona)
                 if pieza_suelta:
-                    donde = (f" Como es una pieza suelta (sin costo de envio), el cliente debe acercarse al punto de entrega: {punto}."
-                             if punto else " Como es una pieza suelta (sin costo de envio), el cliente debe acercarse a la zona; el equipo le confirma el punto exacto.")
+                    donde = (f" Como es una pieza suelta, sin costo si el cliente se acerca al punto de entrega: {punto} (a domicilio son $150 adicionales)."
+                             if punto else " Como es una pieza suelta, sin costo si el cliente se acerca a la zona (el equipo le confirma el punto); a domicilio son $150 adicionales.")
                 else:
                     donde = (f" El punto de entrega de la zona es: {punto} (si pidio que se la lleven a su lugar, anotaste su referencia)."
                              if punto else "")

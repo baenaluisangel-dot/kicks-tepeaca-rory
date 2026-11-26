@@ -216,7 +216,8 @@ HERRAMIENTA_EQUIPO = {
         "pago, el cliente pide hablar con una persona). 'pedido' avisa que hay un pedido por "
         "confirmar (sin pausar). 'duda_producto' y 'fuera_de_catalogo' solo quedan anotados en el "
         "panel: NO pausan ni molestan, y debes seguir atendiendo al cliente. Despues de usarla, "
-        "dile al cliente en una frase lo que corresponda (por ejemplo que lo confirmas mas tarde)."
+        "dile al cliente en una frase lo que corresponda (solo en 'duda_producto' que lo confirmas mas "
+        "tarde; en 'fuera_de_catalogo' que no lo manejas)."
     ),
     "input_schema": {
         "type": "object",
@@ -228,7 +229,7 @@ HERRAMIENTA_EQUIPO = {
                 "description": (
                     "pedido = ya eligio producto y dio datos de entrega (nombre/zona); "
                     "duda_producto = pregunta algo del producto que no sabes (medidas, funciones, pilas...); "
-                    "fuera_de_catalogo = pide algo que no vendemos en esta campana; "
+                    "fuera_de_catalogo = pide algo que no esta en el catalogo (no se consulta: se le dice que no lo manejamos); "
                     "queja_o_problema = queja, pago, comprobante; otro = lo demas."
                 ),
             },
