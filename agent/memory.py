@@ -48,6 +48,19 @@ def ahora() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def como_utc(fecha: datetime | None) -> datetime | None:
+    """
+    Una fecha de la base, siempre con zona horaria.
+
+    PostgreSQL devuelve las fechas con zona, pero SQLite las devuelve sin ella aunque
+    la columna la declare. Restar una contra otra tira TypeError. Como todo lo que
+    guardamos esta en UTC, a la que venga sin zona se le pone UTC.
+    """
+    if fecha is None:
+        return None
+    return fecha if fecha.tzinfo else fecha.replace(tzinfo=timezone.utc)
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -160,9 +173,16 @@ class Atencion(Base):
     ultimo_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
     necesita_persona: Mapped[bool] = mapped_column(default=False)
     motivo: Mapped[str] = mapped_column(Text, default="")
+    # Para responder, Zernio necesita conversation_id y account_id, no basta el telefono.
+    # Rory los tenia solo dentro del webhook; guardandolos aqui, el despachador puede
+    # escribirle a alguien despues, que es de lo que vive todo el seguimiento.
+    contexto: Mapped[str] = mapped_column(Text, default="{}")
 
 
-async def registrar_mensaje_cliente(telefono: str, plataforma: str, texto: str):
+async def registrar_mensaje_cliente(
+    telefono: str, plataforma: str, texto: str, contexto: dict | None = None
+):
+    import json
     async with async_session() as session:
         fila = await session.get(Atencion, telefono)
         if not fila:
@@ -171,7 +191,41 @@ async def registrar_mensaje_cliente(telefono: str, plataforma: str, texto: str):
         fila.plataforma = plataforma
         fila.ultimo_texto = texto[:500]
         fila.ultimo_en = ahora()
+        # Solo lo que hace falta para responder. El resto del contexto cambia en cada
+        # evento y guardarlo entero seria ruido.
+        if contexto:
+            util = {k: v for k, v in contexto.items()
+                    if k in ("conversation_id", "account_id", "plataforma") and v}
+            if util:
+                fila.contexto = json.dumps(util, ensure_ascii=False)
         await session.commit()
+
+
+async def contexto_de(telefono: str) -> dict:
+    """El contexto guardado para escribirle a ese cliente. Vacio si nunca escribio."""
+    import json
+    async with async_session() as session:
+        fila = await session.get(Atencion, telefono)
+    if not fila or not fila.contexto:
+        return {}
+    try:
+        return json.loads(fila.contexto)
+    except ValueError:
+        return {}
+
+
+async def horas_desde_su_ultimo_mensaje(telefono: str) -> float | None:
+    """
+    Cuantas horas pasaron desde que el cliente escribio. None si nunca lo hizo.
+
+    Es el dato que decide si se le puede mandar texto libre: WhatsApp solo lo
+    permite dentro de las 24 h del ultimo mensaje del cliente.
+    """
+    async with async_session() as session:
+        fila = await session.get(Atencion, telefono)
+    if not fila or not fila.ultimo_en:
+        return None
+    return (ahora() - como_utc(fila.ultimo_en)).total_seconds() / 3600
 
 
 async def marcar_necesita_persona(telefono: str, necesita: bool, motivo: str = ""):
@@ -840,6 +894,7 @@ async def inicializar_db():
             ("etiquetas", "zona VARCHAR(60) DEFAULT ''"),
             ("etiquetas", "en_zona VARCHAR(10) DEFAULT ''"),
             ("etiquetas", "producto_elegido VARCHAR(80) DEFAULT ''"),
+            ("atencion", "contexto TEXT DEFAULT '{}'"),
         )
     ]
     from sqlalchemy import text as _sql
@@ -1075,3 +1130,138 @@ async def listar_bitacora(limite: int = 50, agente: str = "") -> list[dict]:
         filas = (await session.execute(consulta)).scalars().all()
     return [{"id": f.id, "agente": f.agente, "accion": f.accion, "motivo": f.motivo,
              "resultado": f.resultado, "creado_en": f.creado_en} for f in filas]
+
+
+# ── Cola de envio ────────────────────────────────────────────────────────────
+# El agente de Cierre decide a quien escribirle y lo deja aqui; el despachador
+# lo manda. Estan separados a proposito: el agente corre por lotes en la nube y
+# el despachador vive en Railway, porque mandar depende de la ventana de 24 h y
+# eso hay que mirarlo en el momento del envio, no cuando se decidio.
+
+
+class Envio(Base):
+    """Un mensaje listo para salir."""
+
+    __tablename__ = "cola_envio"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telefono: Mapped[str] = mapped_column(String(50), index=True)
+    agente: Mapped[str] = mapped_column(String(30), default="cierre")
+    texto: Mapped[str] = mapped_column(Text, default="")
+    # Adjunto opcional, de las bibliotecas que ya viven en static/
+    adjunto_tipo: Mapped[str] = mapped_column(String(10), default="")   # video | audio | foto
+    adjunto_url: Mapped[str] = mapped_column(Text, default="")
+    motivo: Mapped[str] = mapped_column(Text, default="")               # por que se manda
+    programado_para: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
+    estado: Mapped[str] = mapped_column(String(20), default="pendiente", index=True)
+    # pendiente | enviado | requiere_plantilla | fallido | cancelado
+    intentos: Mapped[int] = mapped_column(Integer, default=0)
+    detalle: Mapped[str] = mapped_column(Text, default="")              # por que fallo
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
+    enviado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+MAX_INTENTOS = 3
+
+
+async def encolar_envio(
+    telefono: str,
+    texto: str,
+    agente: str = "cierre",
+    motivo: str = "",
+    adjunto_tipo: str = "",
+    adjunto_url: str = "",
+    demora_horas: float = 0,
+) -> int:
+    """Deja un mensaje listo para salir. demora_horas lo programa mas adelante."""
+    async with async_session() as session:
+        fila = Envio(
+            telefono=telefono, agente=agente, texto=texto, motivo=motivo,
+            adjunto_tipo=adjunto_tipo, adjunto_url=adjunto_url,
+            programado_para=ahora() + timedelta(hours=demora_horas),
+            estado="pendiente", creado_en=ahora(),
+        )
+        session.add(fila)
+        await session.commit()
+        return fila.id
+
+
+async def envios_por_salir(limite: int = 20) -> list[dict]:
+    """Lo que ya toca mandar: pendiente, con su hora cumplida y con intentos de sobra."""
+    async with async_session() as session:
+        filas = (await session.execute(
+            select(Envio)
+            .where(Envio.estado == "pendiente")
+            .where(Envio.programado_para <= ahora())
+            .where(Envio.intentos < MAX_INTENTOS)
+            .order_by(Envio.programado_para)
+            .limit(limite)
+        )).scalars().all()
+    return [{"id": f.id, "telefono": f.telefono, "agente": f.agente, "texto": f.texto,
+             "adjunto_tipo": f.adjunto_tipo, "adjunto_url": f.adjunto_url,
+             "motivo": f.motivo, "intentos": f.intentos} for f in filas]
+
+
+async def tomar_envio(envio_id: int) -> bool:
+    """
+    Aparta un envio antes de mandarlo, subiendole el contador de intentos.
+
+    Pasa de "pendiente" a "enviando" en una sola transaccion: si dos despachadores
+    corren a la vez, solo uno se lo lleva y el cliente no recibe el mensaje dos veces.
+    Devuelve False si otro ya lo tomo.
+    """
+    async with async_session() as session:
+        fila = await session.get(Envio, envio_id)
+        if fila is None or fila.estado != "pendiente":
+            return False
+        fila.estado = "enviando"
+        fila.intentos += 1
+        await session.commit()
+        return True
+
+
+async def marcar_envio(envio_id: int, estado: str, detalle: str = ""):
+    """
+    Cierra un envio. Un fallo con intentos de sobra vuelve a "pendiente" para
+    reintentarse; sin intentos de sobra se queda en "fallido" y alguien lo mira.
+    """
+    async with async_session() as session:
+        fila = await session.get(Envio, envio_id)
+        if fila is None:
+            return
+        if estado == "fallido" and fila.intentos < MAX_INTENTOS:
+            fila.estado = "pendiente"
+            # Se espera un poco mas en cada reintento, por si la falla es pasajera
+            fila.programado_para = ahora() + timedelta(minutes=15 * fila.intentos)
+        else:
+            fila.estado = estado
+        fila.detalle = (detalle or "")[:500]
+        if estado == "enviado":
+            fila.enviado_en = ahora()
+        await session.commit()
+
+
+async def cancelar_envios_de(telefono: str) -> int:
+    """
+    Cancela lo que quedaba por mandarle a alguien. Se usa cuando el cliente contesta:
+    el seguimiento automatico deja de tener sentido y Rory retoma la conversacion.
+    """
+    async with async_session() as session:
+        resultado = await session.execute(
+            select(Envio).where(Envio.telefono == telefono).where(Envio.estado == "pendiente")
+        )
+        filas = resultado.scalars().all()
+        for f in filas:
+            f.estado = "cancelado"
+            f.detalle = "el cliente contesto"
+        await session.commit()
+        return len(filas)
+
+
+async def resumen_cola() -> dict:
+    """Cuantos envios hay en cada estado. Para el panel y el resumen diario."""
+    async with async_session() as session:
+        filas = (await session.execute(
+            select(Envio.estado, func.count(Envio.id)).group_by(Envio.estado)
+        )).all()
+    return {estado: total for estado, total in filas}
