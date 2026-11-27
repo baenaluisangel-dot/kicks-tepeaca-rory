@@ -1,0 +1,89 @@
+# Ficha de campaña — Toy Story Puebla
+# Las reglas que rigen esta ficha están en ORQUESTADOR.md. Aquí solo van los datos
+# de ESTE producto. Si algo de aquí tuviera que ser una regla general, va allá.
+
+id: toy-story-puebla
+negocio: Kicks
+activa: true
+creada: 2026-11-27
+
+producto:
+  que_se_vende: >-
+    Juguetes originales Disney Toy Story, en pieza suelta o en paquete armado.
+    Sellados de fábrica, de hasta 35 cm.
+  categorias: [Toy Story]
+  rango_ticket: {min: 350, max: 4420}
+
+mercado:
+  a_quien: >-
+    Papás, mamás y familiares que buscan regalo de Navidad o Reyes para un niño.
+    También adultos coleccionistas, que llegan por el ángulo de nostalgia.
+  zona: Puebla capital + 15 km, más el corredor Amozoc-Chachapa-Amalucan
+  canal: whatsapp
+  origen: Meta Ads, clic a WhatsApp
+
+entrega:
+  modo: punto_fijo
+  dias: [martes, jueves, sabado]
+  franjas: ["13:00-16:00", "16:00-20:00"]
+  pago: contra_entrega        # sin anticipo; tarjeta sí, meses sin intereses no
+  puntos:
+    Amozoc: Little Caesars, cerca de la Gran Bodega
+    Chachapa: Bimbo, o el 3B de enfrente
+    Amalucan: Entronque
+    CAPU: Afuera de la terminal
+    Centro de Puebla: Al lado de la Catedral
+    CU: Frente al complejo universitario
+    Valsequillo: AutoZone
+    Peri Plaza: AutoZone
+    Angelópolis: La Estrella de Puebla
+  corredor_de_paso: [Amozoc, Chachapa, Amalucan]   # sin mínimo: quedan de camino
+  a_domicilio:
+    desde_piezas: 3
+    desde_monto: 2000
+    condicion: solo si queda cerca de un punto de la ruta
+
+economia:
+  # ENTRADAS — medidas, no estimadas. Fuente y fecha abajo.
+  margen: 0.402                        # 13 operaciones reales contra costos
+  ticket_promedio: 1605
+  tasa_conversacion_a_venta: 0.0121    # 9 agendadas de 742 conversaciones
+  costo_vuelta: 400                    # gasolina + casetas, Tepeaca-Puebla
+  medido_el: 2026-11-27
+  fuente: pestaña Agenda + insights de Meta, 7 días
+
+  # DERIVADOS — con las fórmulas de ORQUESTADOR.md §4.
+  # Recalcular en cuanto cambie cualquier entrada de arriba.
+  utilidad_por_venta: 645
+  tope_por_venta: 645
+  tope_por_conversacion: 7.82
+  verde_hasta: 4.50
+  amarillo_hasta: 7.00
+  presupuesto_diario_tope: 650         # lo que sostienen 25 entregas semanales
+  vuelta_sale_desde: 1200              # utilidad bruta agendada
+
+ventana:
+  cierra: 2027-01-06
+  razon: >-
+    Después de Reyes la demanda de juguete se cae y el inventario se queda
+    hasta la próxima temporada.
+  hitos:
+    - {fecha: 2026-12-10, que: cierre de la ventana del revendedor}
+    - {fecha: 2026-12-18, que: última ruta útil antes de Navidad}
+    - {fecha: 2026-12-24, que: Navidad}
+
+objetivo:
+  tipo: liquidar_inventario
+  meta: 371 piezas antes del cierre
+  nota: >-
+    Toy Story son 87 de esas piezas. El resto del catálogo necesita su propia
+    ficha antes de mediados de diciembre, o no se alcanza a mover.
+
+nunca_prometer:
+  - El Buzz del Dúo Woody y Buzz con alas. No las trae; el de alas se vende
+    aparte en $900. Ya se les dijo mal a tres clientes.
+  - La Colección Completa de 6 piezas mientras no haya Tiro al Blanco.
+  - Slinky, Señores Cara de Papa, Lotso o Buddy. No se manejan.
+  - Meses sin intereses.
+  - Hora exacta de entrega sin confirmar la ruta del día.
+  - Apartado a quien no sea cliente de la tienda de Tepeaca.
