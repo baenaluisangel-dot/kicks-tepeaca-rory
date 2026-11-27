@@ -118,6 +118,15 @@ logger = logging.getLogger("agentkit")
 # y hace imposible leer lo que hizo el agente.
 logger.setLevel(logging.DEBUG if ENVIRONMENT == "development" else logging.INFO)
 
+# httpx registra la URL completa de cada peticion a nivel INFO, y Telegram mete el
+# token del bot DENTRO de la ruta:
+#   POST https://api.telegram.org/bot<TOKEN>/sendMessage
+# Eso dejaba el token en texto plano en los logs de Railway, en cada aviso. Con el
+# bot aprobando decisiones de negocio, ese token vale mas que ayer.
+# A WARNING se siguen viendo los fallos de red, que es lo que importa diagnosticar.
+for _ruidosa in ("httpx", "httpcore"):
+    logging.getLogger(_ruidosa).setLevel(logging.WARNING)
+
 PORT = int(os.getenv("PORT", "8000"))
 
 # Un candado por numero de telefono. En WhatsApp es normal que alguien mande "hola" y
