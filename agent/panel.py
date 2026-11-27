@@ -42,6 +42,7 @@ from agent.memory import (
     listar_ejemplos,
     listar_entregas,
     listar_rutas,
+    resumen_mercado,
     marcar_necesita_persona,
     metricas,
     pausar,
@@ -191,11 +192,13 @@ textarea{width:100%}.search{flex:1;min-width:200px}
 .b small{display:block;color:var(--mut);font-size:11px;margin-bottom:2px}.b.cli{background:var(--card);border:1px solid var(--line);align-self:flex-start;border-bottom-left-radius:4px}
 .b.rory{background:var(--okbg);align-self:flex-end;border-bottom-right-radius:4px}.acc{align-self:flex-end;font-size:13px;color:var(--mut);max-width:86%}
 details summary{cursor:pointer;color:var(--acc);font-size:13px;margin-top:6px}details form{margin-top:6px;display:grid;gap:6px}
+.tabla{width:100%;border-collapse:collapse;margin-top:10px}.tabla th{text-align:left;font-size:12px;color:var(--mut);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}.tabla td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}.tabla tr:last-child td{border-bottom:0}
 .empty{padding:26px;text-align:center;color:var(--mut)}@media(max-width:640px){h1{font-size:21px}.stat .n{font-size:26px}.conv{grid-template-columns:40px 1fr}.conv .acts{grid-column:1/-1}}
 """
 
 NAV = [("resumen", "Resumen", "/panel"), ("conversaciones", "Conversaciones", "/panel/conversaciones"),
        ("entregas", "Entregas", "/panel/entregas"), ("voz", "Voz del cliente", "/panel/voz"),
+       ("mercado", "Mercado", "/panel/mercado"),
        ("practica", "Practicar con Rory", "/panel/practica")]
 
 
@@ -769,6 +772,71 @@ async function guardar(id,bueno){
 }
 """
 
+
+
+# ── Mercado: lo que el scraper vio alla afuera ───────────────────────────────
+
+def _fila_tipo(etiqueta: str, t: dict | None) -> str:
+    """Una celda con el rango de precios de un tipo. Vacia si no hay nada de ese tipo."""
+    if not t:
+        return f'<td class="mut small">sin datos de {etiqueta}</td>'
+    rango = f'${t["min"]:,.0f}' if t["min"] == t["max"] else f'${t["min"]:,.0f} – ${t["max"]:,.0f}'
+    return (f'<td><b>${t["mediana"]:,.0f}</b> <span class="mut small">mediana · '
+            f'{rango} · {t["n"]} vista(s)</span></td>')
+
+
+@router.get("/panel/mercado", response_class=HTMLResponse)
+async def panel_mercado(token: str = "", dias: int = 30):
+    _exigir(token)
+    r = await resumen_mercado(desde_dias=max(1, min(dias, 365)))
+
+    if not r["total"]:
+        cuerpo = ('<div class="card empty">Todavia no hay observaciones del scraper. '
+                  'Cuando corra, aparecen aqui.</div>')
+        return pagina(token, "mercado", "Mercado", cuerpo)
+
+    stats = (
+        f'<div class="grid stats">'
+        f'<div class="card stat"><div class="n">{r["total"]}</div><div class="t">Videos analizados</div></div>'
+        f'<div class="card stat"><div class="n">{r["con_precio"]}</div><div class="t">Con precio visible</div></div>'
+        f'<div class="card stat"><div class="n">{r["sin_precio"]}</div><div class="t">Sin precio</div></div>'
+        f'<div class="card stat"><div class="n">{len(r["productos"])}</div><div class="t">Productos distintos</div></div>'
+        f'</div>'
+    )
+
+    filas = ""
+    for prod in r["productos"]:
+        may = prod["tipos"].get("mayoreo")
+        men = prod["tipos"].get("menudeo")
+        enlaces = ""
+        for t in (may, men):
+            if t:
+                for u in t["urls"][:2]:
+                    enlaces += f'<a href="{html.escape(u)}" target="_blank" rel="noopener">ver</a> '
+        filas += (
+            f'<tr><td><b>{html.escape(prod["nombre"])}</b></td>'
+            f'{_fila_tipo("mayoreo", may)}{_fila_tipo("menudeo", men)}'
+            f'<td class="small">{enlaces}</td></tr>'
+        )
+
+    tabla = (
+        '<div class="card"><h3>Precios vistos, por producto</h3>'
+        '<p class="mut small">La mediana es el precio de en medio: con pocas observaciones '
+        'es mas confiable que el promedio, al que lo mueve un solo precio raro.</p>'
+        '<table class="tabla"><thead><tr><th>Producto</th><th>Mayoreo</th>'
+        '<th>Menudeo</th><th></th></tr></thead><tbody>'
+        + filas + '</tbody></table></div>'
+    )
+
+    autores = "".join(
+        f'<span class="chip">{html.escape(a)} · {n}</span>' for a, n in r["autores"]
+    )
+    cuentas = (f'<div class="card"><h3>Cuentas que mas aparecen</h3>'
+               f'<div class="chips">{autores}</div></div>') if autores else ""
+
+    return pagina(token, "mercado", "Mercado",
+                  stats + tabla + cuentas,
+                  subtitulo=f"Lo que el scraper vio en los ultimos {dias} dias.")
 
 @router.get("/panel/practica", response_class=HTMLResponse)
 async def panel_practica(token: str = "", ok: str = ""):

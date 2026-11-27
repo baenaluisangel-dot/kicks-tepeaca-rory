@@ -625,6 +625,59 @@ async def dias_disponibles(zona: str, desde_fecha: str) -> list[dict]:
     return [salida[k] for k in sorted(salida)]
 
 
+
+async def resumen_mercado(desde_dias: int = 30) -> dict:
+    """
+    Lo que el scraper vio, agrupado por producto y por tipo de precio.
+
+    Devuelve rangos y mediana, nunca un promedio solo: con pocas observaciones el
+    promedio lo mueve un solo precio raro y acaba mintiendo mas de lo que informa.
+    """
+    corte = ahora() - timedelta(days=desde_dias)
+    async with async_session() as session:
+        filas = (await session.execute(
+            select(Observacion).where(Observacion.creado_en >= corte)
+        )).scalars().all()
+
+    por_producto: dict[str, dict] = {}
+    autores: dict[str, int] = {}
+    sin_precio = 0
+
+    for f in filas:
+        if f.autor:
+            autores[f.autor] = autores.get(f.autor, 0) + 1
+        if not f.precio or f.precio <= 0:
+            sin_precio += 1
+            continue
+        nombre = (f.producto or "").strip() or "(sin producto)"
+        clave = _sin_acentos(nombre).lower()
+        g = por_producto.setdefault(clave, {"nombre": nombre, "tipos": {}})
+        t = g["tipos"].setdefault(f.tipo_precio or "no_claro", {"precios": [], "urls": []})
+        t["precios"].append(f.precio)
+        if f.url and len(t["urls"]) < 5:
+            t["urls"].append(f.url)
+
+    productos = []
+    for g in por_producto.values():
+        tipos = {}
+        for nombre_tipo, t in g["tipos"].items():
+            ps = sorted(t["precios"])
+            tipos[nombre_tipo] = {
+                "n": len(ps), "min": ps[0], "max": ps[-1],
+                "mediana": ps[len(ps) // 2], "urls": t["urls"],
+            }
+        productos.append({"nombre": g["nombre"], "tipos": tipos,
+                          "n": sum(t["n"] for t in tipos.values())})
+    productos.sort(key=lambda x: (-x["n"], x["nombre"]))
+
+    return {
+        "total": len(filas),
+        "con_precio": len(filas) - sin_precio,
+        "sin_precio": sin_precio,
+        "productos": productos,
+        "autores": sorted(autores.items(), key=lambda kv: -kv[1])[:15],
+    }
+
 async def rutas_con_pedido_grande(desde_fecha: str) -> list[dict]:
     """Dias y zonas de la ruta semanal que ya tienen un pedido grande (paquete o 2+ juguetes)
     agendado y todavia lugar: ahi se puede meter una pieza suelta porque ya se va a pasar."""
