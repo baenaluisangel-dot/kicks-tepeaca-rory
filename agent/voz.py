@@ -40,6 +40,10 @@ from agent.memory import (
 
 logger = logging.getLogger("agentkit")
 
+# Leer cada conversacion es una tarea sencilla y repetida: se usa el modelo mas economico.
+# Rory sigue contestando a los clientes con MODELO.
+MODELO_CLASIFICAR = os.getenv("ANTHROPIC_MODEL_CLASIFICAR") or "claude-haiku-5-5"
+
 # Categorias fijas: asi se pueden contar. Lo que no encaje cae en "otro".
 DUDAS = ["medidas", "voz_o_sonidos", "pilas", "originalidad", "precio", "costo_envio",
          "zonas_o_horarios", "forma_de_pago", "fotos_o_videos", "disponibilidad", "apartado", "otro"]
@@ -150,7 +154,8 @@ def _aware(d: datetime) -> datetime:
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
-async def _pedir_registro(sistema: str, contenido: str, herramienta: dict, max_tokens: int) -> dict:
+async def _pedir_registro(sistema: str, contenido: str, herramienta: dict, max_tokens: int,
+                          modelo: str = MODELO) -> dict:
     """
     Pide a Claude que conteste con la herramienta y devuelve sus datos.
 
@@ -160,7 +165,7 @@ async def _pedir_registro(sistema: str, contenido: str, herramienta: dict, max_t
     orden = f"\n\nContesta unicamente llamando a la herramienta {herramienta['name']}, sin texto."
     for _ in range(2):
         resp = await client.messages.create(
-            model=MODELO, max_tokens=max_tokens, system=sistema + orden,
+            model=modelo, max_tokens=max_tokens, system=sistema + orden,
             messages=[{"role": "user", "content": contenido}], tools=[herramienta],
         )
         datos = next((b.input for b in resp.content if b.type == "tool_use"), None)
@@ -172,7 +177,12 @@ async def _pedir_registro(sistema: str, contenido: str, herramienta: dict, max_t
 # ── 1. Etiquetar ─────────────────────────────────────────────────────────────
 
 async def _chats_por_etiquetar() -> list[tuple[str, int]]:
-    """Conversaciones nuevas o que cambiaron desde la ultima etiqueta, ya calmadas."""
+    """
+    Conversaciones nuevas o que cambiaron desde la ultima etiqueta, ya calmadas.
+
+    Solo las de clientes que siguieron escribiendo despues de la primera respuesta (o que
+    agendaron): las demas no se leen, para no gastar en ellas.
+    """
     dueno = (os.getenv("OWNER_WHATSAPP") or "").strip()
     async with async_session() as session:
         filas = (await session.execute(
@@ -182,12 +192,18 @@ async def _chats_por_etiquetar() -> list[tuple[str, int]]:
         # Las etiquetas viejas sin zona (en_zona vacio) se vuelven a leer una vez
         etiquetadas = dict((await session.execute(
             select(Etiqueta.telefono, Etiqueta.ultimo_msg_id).where(Etiqueta.en_zona != ""))).all())
+        primera = (select(Mensaje.telefono.label("tel"), func.min(Mensaje.id).label("id"))
+                   .where(Mensaje.role != "user").group_by(Mensaje.telefono).subquery())
+        siguieron = set((await session.execute(
+            select(Mensaje.telefono).join(primera, primera.c.tel == Mensaje.telefono)
+            .where(Mensaje.role == "user", Mensaje.id > primera.c.id).distinct())).scalars().all())
+        siguieron |= set((await session.execute(select(Entrega.telefono))).scalars().all())
     limite = ahora() - timedelta(minutes=MIN_REPOSO_MIN)
     pendientes = []
     for tel, ultimo_id, ultima_hora, n_cliente in filas:
         if dueno and tel == dueno:
             continue
-        if not n_cliente or _aware(ultima_hora) > limite:
+        if not n_cliente or tel not in siguieron or _aware(ultima_hora) > limite:
             continue
         if ultimo_id > etiquetadas.get(tel, 0):
             pendientes.append((tel, ultimo_id))
@@ -214,7 +230,8 @@ async def _etiquetar_uno(tel: str, ultimo_id: int):
     texto = _texto_chat(turnos)
     if not texto.strip():
         return
-    datos = await _pedir_registro(PROMPT_ETIQUETA, f"Canal: {_canal(tel)}\n\n{texto}", HERRAMIENTA_ETIQUETA, 4096)
+    datos = await _pedir_registro(PROMPT_ETIQUETA, f"Canal: {_canal(tel)}\n\n{texto}", HERRAMIENTA_ETIQUETA, 4096,
+                                  modelo=MODELO_CLASIFICAR)
     async with async_session() as session:
         agendo = (await session.execute(select(Entrega.id).where(Entrega.telefono == tel).limit(1))).first()
         resultado = "compro_o_agendo" if agendo else datos.get("resultado", "en_curso")
@@ -227,20 +244,29 @@ async def _etiquetar_uno(tel: str, ultimo_id: int):
             fila = Etiqueta(telefono=tel)
             session.add(fila)
         fila.canal = _canal(tel)
-        fila.productos = json.dumps([str(p)[:60] for p in datos.get("productos", [])][:6], ensure_ascii=False)
+        fila.productos = json.dumps([_dato(p)[:60] for p in datos.get("productos", []) if _dato(p)][:6], ensure_ascii=False)
         fila.dudas = json.dumps(dudas, ensure_ascii=False)
         fila.objecion = objecion if objecion in OBJECIONES else "sin_motivo_claro"
         fila.resultado = resultado
         fila.frases = json.dumps([_limpiar_frase(f) for f in datos.get("frases", [])][:3], ensure_ascii=False)
         fila.ultimo_msg_id = ultimo_id
-        fila.zona = _limpiar_frase(datos.get("zona", ""))[:60]
+        fila.zona = _limpiar_frase(_dato(datos.get("zona")))[:60]
         en_zona = datos.get("en_zona", "no_dijo")
         fila.en_zona = en_zona if en_zona in EN_ZONA else "no_dijo"
-        fila.producto_elegido = _limpiar_frase(datos.get("producto_elegido", ""))[:80]
+        fila.producto_elegido = _limpiar_frase(_dato(datos.get("producto_elegido")))[:80]
         # La fecha de la etiqueta es la de la conversacion, no la de la lectura: asi
         # "ultimos 7 dias" no incluye chats viejos que se acaban de releer
         fila.actualizado_en = turnos[-1]["hora"]
         await session.commit()
+
+
+_VACIOS = {"", "ninguno", "ninguna", "vacio", "vacío", "n/a", "na", "null", "none", "no dijo", "no_dijo"}
+
+
+def _dato(valor) -> str:
+    """El modelo economico a veces escribe comillas vacias o "ninguno" en lugar de dejar el campo vacio."""
+    texto = str(valor or "").strip().strip("\"'").strip()
+    return "" if texto.lower() in _VACIOS else texto
 
 
 def _limpiar_frase(f: str) -> str:
@@ -395,14 +421,18 @@ async def clasificar_pendientes() -> int:
 
 
 async def bucle_clasificar():
-    """Cada pocas horas clasifica lo nuevo, para que la hoja de calculo este al dia."""
-    horas = float(os.getenv("HOJA_CADA_HORAS") or "3")
+    """Al arrancar se pone al dia y despues clasifica una vez al dia, a HORA_HOJA (hora de Mexico)."""
+    hora = int(os.getenv("HORA_HOJA") or "22")
     await asyncio.sleep(120)
     while True:
         n = await clasificar_pendientes()
         if n:
             logger.info(f"Conversaciones clasificadas para la hoja: {n}")
-        await asyncio.sleep(horas * 3600)
+        ahora_mx = datetime.now(zona_mx())
+        objetivo = ahora_mx.replace(hour=hora, minute=0, second=0, microsecond=0)
+        if objetivo <= ahora_mx:
+            objetivo += timedelta(days=1)
+        await asyncio.sleep((objetivo - ahora_mx).total_seconds())
 
 
 def texto_telegram(contenido: dict) -> str:
