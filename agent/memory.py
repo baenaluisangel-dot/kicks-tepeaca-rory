@@ -1265,3 +1265,148 @@ async def resumen_cola() -> dict:
             select(Envio.estado, func.count(Envio.id)).group_by(Envio.estado)
         )).all()
     return {estado: total for estado, total in filas}
+
+
+# ── Observaciones de mercado ─────────────────────────────────────────────────
+# Lo que el scraper ve afuera: precios, productos y senales de TikTok y otras
+# fuentes. Se guarda CRUDO, una fila por video o post, no resumido: un resumen
+# pierde la posibilidad de volver a analizar cuando cambia la pregunta, y nadie
+# puede verificar de donde salio un numero.
+#
+# El scraper observa; el Agente de Mercado concluye. No al reves.
+
+
+class Observacion(Base):
+    """Un video, live o post que el scraper vio."""
+
+    __tablename__ = "observaciones_mercado"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fuente: Mapped[str] = mapped_column(String(20), index=True)   # tiktok | tiktok_live | otro
+    # La url es la huella: si el scraper pasa dos veces por el mismo video, no se duplica.
+    url: Mapped[str] = mapped_column(String(500), unique=True)
+    autor: Mapped[str] = mapped_column(String(120), default="")
+    publicado_en: Mapped[str] = mapped_column(String(10), default="")   # YYYY-MM-DD
+    texto: Mapped[str] = mapped_column(Text, default="")                # caption + transcripcion
+    producto: Mapped[str] = mapped_column(String(160), default="", index=True)
+    precio: Mapped[int] = mapped_column(Integer, default=0)
+    moneda: Mapped[str] = mapped_column(String(5), default="MXN")
+    # Confundir mayoreo con menudeo es la forma mas rapida de poner mal los precios.
+    # Si el scraper no puede distinguirlo, pone no_claro y no adivina.
+    tipo_precio: Mapped[str] = mapped_column(String(12), default="no_claro")
+    ubicacion: Mapped[str] = mapped_column(String(80), default="")
+    vistas: Mapped[int] = mapped_column(Integer, default=0)
+    likes: Mapped[int] = mapped_column(Integer, default=0)
+    comentarios: Mapped[int] = mapped_column(Integer, default=0)
+    # evaluar = precios de lo que ya vendemos; explorar = productos que todavia no
+    proposito: Mapped[str] = mapped_column(String(10), default="evaluar", index=True)
+    crudo: Mapped[str] = mapped_column(Text, default="{}")
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
+
+
+FUENTES = ("tiktok", "tiktok_live", "otro")
+TIPOS_PRECIO = ("menudeo", "mayoreo", "no_claro")
+PROPOSITOS = ("evaluar", "explorar")
+
+
+def _entero(valor) -> int:
+    try:
+        return max(0, int(float(valor)))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def guardar_observaciones(filas: list[dict]) -> dict:
+    """
+    Guarda un lote del scraper. Devuelve cuantas entraron, cuantas ya estaban y
+    cuantas se rechazaron, con el motivo de las primeras rechazadas.
+
+    Valida en vez de confiar: lo que llega lo produjo otra maquina leyendo texto
+    de desconocidos, asi que puede venir incompleto o mal formado.
+    """
+    import json
+    guardadas = repetidas = 0
+    rechazos: list[str] = []
+
+    for i, fila in enumerate(filas):
+        url = str(fila.get("url") or "").strip()[:500]
+        if not url.startswith(("http://", "https://")):
+            if len(rechazos) < 5:
+                rechazos.append(f"fila {i}: sin url valida")
+            continue
+
+        fuente = str(fila.get("fuente") or "otro").strip().lower()
+        if fuente not in FUENTES:
+            fuente = "otro"
+        tipo = str(fila.get("tipo_precio") or "no_claro").strip().lower()
+        if tipo not in TIPOS_PRECIO:
+            tipo = "no_claro"
+        proposito = str(fila.get("proposito") or "evaluar").strip().lower()
+        if proposito not in PROPOSITOS:
+            proposito = "evaluar"
+
+        try:
+            async with async_session() as session:
+                session.add(Observacion(
+                    fuente=fuente, url=url,
+                    autor=str(fila.get("autor") or "")[:120],
+                    publicado_en=str(fila.get("publicado_en") or "")[:10],
+                    # El texto se guarda tal cual, pero acotado: una transcripcion
+                    # larguisima no aporta mas y si infla la base.
+                    texto=str(fila.get("texto") or "")[:8000],
+                    producto=str(fila.get("producto") or "")[:160],
+                    precio=_entero(fila.get("precio")),
+                    moneda=str(fila.get("moneda") or "MXN")[:5],
+                    tipo_precio=tipo,
+                    ubicacion=str(fila.get("ubicacion") or "")[:80],
+                    vistas=_entero(fila.get("vistas")),
+                    likes=_entero(fila.get("likes")),
+                    comentarios=_entero(fila.get("comentarios")),
+                    proposito=proposito,
+                    crudo=json.dumps(fila.get("crudo") or {}, ensure_ascii=False)[:4000],
+                    creado_en=ahora(),
+                ))
+                await session.commit()
+                guardadas += 1
+        except IntegrityError:
+            repetidas += 1   # ya habiamos visto ese video
+
+    return {"guardadas": guardadas, "repetidas": repetidas,
+            "rechazadas": len(filas) - guardadas - repetidas, "motivos": rechazos}
+
+
+async def observaciones(
+    proposito: str = "", producto: str = "", desde_dias: int = 30, limite: int = 200
+) -> list[dict]:
+    """Lo que el scraper vio, lo mas reciente primero."""
+    corte = ahora() - timedelta(days=desde_dias)
+    async with async_session() as session:
+        consulta = select(Observacion).where(Observacion.creado_en >= corte)
+        if proposito:
+            consulta = consulta.where(Observacion.proposito == proposito)
+        if producto:
+            consulta = consulta.where(Observacion.producto.ilike(f"%{producto}%"))
+        filas = (await session.execute(
+            consulta.order_by(Observacion.creado_en.desc()).limit(limite)
+        )).scalars().all()
+    return [{"id": f.id, "fuente": f.fuente, "url": f.url, "autor": f.autor,
+             "publicado_en": f.publicado_en, "texto": f.texto, "producto": f.producto,
+             "precio": f.precio, "moneda": f.moneda, "tipo_precio": f.tipo_precio,
+             "ubicacion": f.ubicacion, "vistas": f.vistas, "likes": f.likes,
+             "comentarios": f.comentarios, "proposito": f.proposito,
+             "creado_en": f.creado_en} for f in filas]
+
+
+async def precios_observados(producto: str, tipo_precio: str = "menudeo") -> dict:
+    """
+    Que precios se han visto afuera para un producto. Devuelve el conteo y el rango,
+    no un promedio solo: con tres observaciones un promedio enga\u00f1a mas de lo que informa.
+    """
+    filas = [o for o in await observaciones(producto=producto, limite=500)
+             if o["tipo_precio"] == tipo_precio and o["precio"] > 0]
+    if not filas:
+        return {"n": 0}
+    precios = sorted(o["precio"] for o in filas)
+    medio = precios[len(precios) // 2]
+    return {"n": len(precios), "min": precios[0], "max": precios[-1], "mediana": medio,
+            "fuentes": [o["url"] for o in filas[:5]]}
