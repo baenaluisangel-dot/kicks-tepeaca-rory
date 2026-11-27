@@ -7,8 +7,9 @@ Dos tablas en CSV que Google Sheets lee sola con IMPORTDATA:
   agendo o compro.
 - Resumen diario: un conteo por dia y anuncio.
 
-Las conversaciones donde el cliente no escribio nada despues de la primera respuesta no se
-registran (ni se leen con Claude), salvo que hayan agendado o comprado.
+Las conversaciones donde el cliente no escribio nada despues de la primera respuesta solo se
+cuentan en el resumen (columna no_contesto), para ver que anuncio atrae mas curiosos. No se
+leen con Claude, asi que contarlas no cuesta.
 
 No salen nombres. El telefono sale solo en "Calificadas" (por decision del dueño, para
 ubicar al cliente y anotar su venta en el panel). Cada conversacion lleva ademas un codigo
@@ -37,7 +38,7 @@ COLUMNAS_CALIFICADAS = [
     "producto_elegido", "agendo", "fecha_entrega", "zona_entrega", "venta_mxn", "resultado",
     "objecion", "dudas", "frases", "ultimo_mensaje",
 ]
-ESTADOS = ["calificadas", "fuera_zona", "sin_interes", "otro", "sin_clasificar"]
+ESTADOS = ["calificadas", "no_contesto", "fuera_zona", "sin_interes", "otro", "sin_clasificar"]
 COLUMNAS_RESUMEN = ["fecha", "canal", "ad_id", "ad_name", "campaign_name", "convos_totales", *ESTADOS,
                     "agendadas", "ventas", "venta_mxn"]
 
@@ -135,8 +136,6 @@ async def conversaciones() -> list[dict]:
         n_ventas, monto = cobrado.get(tel, (0, 0))
         grupo = clasificar(agendo=en is not None, compro=n_ventas > 0, hubo_respuesta=c["hubo_respuesta"],
                            cliente_siguio=c["cliente_siguio"], etiqueta=et)
-        if grupo == "no_contesto":
-            continue
         salida.append({
             "fecha": _aware(c["inicio"]).astimezone(zona_mx()).strftime("%Y-%m-%d"),
             "ultimo_mensaje": _aware(c["ultimo"]).astimezone(zona_mx()).strftime("%Y-%m-%d %H:%M"),
