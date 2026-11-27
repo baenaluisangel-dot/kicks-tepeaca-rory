@@ -1316,6 +1316,21 @@ def _entero(valor) -> int:
         return 0
 
 
+def _texto_seguro(valor, limite: int) -> str:
+    """
+    Texto listo para Postgres, recortado a "limite".
+
+    Los captions de TikTok llegan con emojis partidos a la mitad (surrogates
+    sueltos como \\ud83e). Python los acepta como str, pero asyncpg no los puede
+    codificar y revienta la insercion. Aqui se tiran: perder medio emoji no
+    cuesta nada, perder la observacion si.
+    """
+    texto = str(valor or "")
+    if not texto.isascii():
+        texto = texto.encode("utf-8", "ignore").decode("utf-8", "ignore")
+    return texto[:limite]
+
+
 async def guardar_observaciones(filas: list[dict]) -> dict:
     """
     Guarda un lote del scraper. Devuelve cuantas entraron, cuantas ya estaban y
@@ -1329,7 +1344,7 @@ async def guardar_observaciones(filas: list[dict]) -> dict:
     rechazos: list[str] = []
 
     for i, fila in enumerate(filas):
-        url = str(fila.get("url") or "").strip()[:500]
+        url = _texto_seguro(fila.get("url"), 500).strip()
         if not url.startswith(("http://", "https://")):
             if len(rechazos) < 5:
                 rechazos.append(f"fila {i}: sin url valida")
@@ -1349,27 +1364,33 @@ async def guardar_observaciones(filas: list[dict]) -> dict:
             async with async_session() as session:
                 session.add(Observacion(
                     fuente=fuente, url=url,
-                    autor=str(fila.get("autor") or "")[:120],
-                    publicado_en=str(fila.get("publicado_en") or "")[:10],
+                    autor=_texto_seguro(fila.get("autor"), 120),
+                    publicado_en=_texto_seguro(fila.get("publicado_en"), 10),
                     # El texto se guarda tal cual, pero acotado: una transcripcion
                     # larguisima no aporta mas y si infla la base.
-                    texto=str(fila.get("texto") or "")[:8000],
-                    producto=str(fila.get("producto") or "")[:160],
+                    texto=_texto_seguro(fila.get("texto"), 8000),
+                    producto=_texto_seguro(fila.get("producto"), 160),
                     precio=_entero(fila.get("precio")),
-                    moneda=str(fila.get("moneda") or "MXN")[:5],
+                    moneda=_texto_seguro(fila.get("moneda") or "MXN", 5),
                     tipo_precio=tipo,
-                    ubicacion=str(fila.get("ubicacion") or "")[:80],
+                    ubicacion=_texto_seguro(fila.get("ubicacion"), 80),
                     vistas=_entero(fila.get("vistas")),
                     likes=_entero(fila.get("likes")),
                     comentarios=_entero(fila.get("comentarios")),
                     proposito=proposito,
-                    crudo=json.dumps(fila.get("crudo") or {}, ensure_ascii=False)[:4000],
+                    crudo=_texto_seguro(json.dumps(fila.get("crudo") or {}, ensure_ascii=False), 4000),
                     creado_en=ahora(),
                 ))
                 await session.commit()
                 guardadas += 1
         except IntegrityError:
             repetidas += 1   # ya habiamos visto ese video
+        except Exception as e:  # noqa: BLE001
+            # Una sola fila envenenada no debe tirar el lote: el scraper
+            # reintentaria el mismo veneno para siempre y nunca avanzaria.
+            logger.error(f"Observacion rechazada ({url}): {type(e).__name__}: {e}")
+            if len(rechazos) < 5:
+                rechazos.append(f"fila {i}: {type(e).__name__}")
 
     return {"guardadas": guardadas, "repetidas": repetidas,
             "rechazadas": len(filas) - guardadas - repetidas, "motivos": rechazos}

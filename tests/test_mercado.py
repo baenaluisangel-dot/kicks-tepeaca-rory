@@ -122,3 +122,42 @@ async def test_los_precios_devuelven_rango_y_no_solo_promedio():
 @pytest.mark.asyncio
 async def test_sin_observaciones_no_inventa_un_precio():
     assert await precios_observados("Algo que nadie vende") == {"n": 0}
+
+
+# ── Texto que Postgres no puede tragar ───────────────────────────────────────
+
+async def test_un_emoji_partido_no_tumba_la_observacion():
+    """
+    Los captions de TikTok llegan con surrogates sueltos. Antes reventaban la
+    insercion, el endpoint devolvia 500 y el scraper reintentaba el mismo
+    veneno para siempre.
+    """
+    from agent.memory import guardar_observaciones
+
+    r = await guardar_observaciones([{
+        "fuente": "tiktok", "url": "https://t.co/emoji-roto",
+        "texto": "Juguetes BARATOS al mayoreo \ud83e en el centro",
+        "producto": "Woody \ud83e", "autor": "@tienda\ud83e",
+        "precio": 300, "tipo_precio": "mayoreo",
+    }])
+    assert r["guardadas"] == 1, r
+
+    from agent.memory import observaciones
+    fila = next(o for o in await observaciones(limite=500)
+                if o["url"] == "https://t.co/emoji-roto")
+    assert "\ud83e" not in fila["texto"]
+    assert "BARATOS al mayoreo" in fila["texto"]   # lo demas sobrevive intacto
+
+
+async def test_una_fila_mala_no_se_lleva_el_lote():
+    """La buena entra aunque la de junto falle: perder el lote es perder horas."""
+    from agent.memory import guardar_observaciones
+
+    r = await guardar_observaciones([
+        {"fuente": "tiktok", "url": "https://t.co/lote-ok-1",
+         "texto": "normal", "producto": "Rex", "precio": 300},
+        {"fuente": "tiktok", "url": "no-es-una-url", "texto": "mala"},
+        {"fuente": "tiktok", "url": "https://t.co/lote-ok-2",
+         "texto": "normal", "producto": "Buzz", "precio": 400},
+    ])
+    assert r["guardadas"] == 2 and r["rechazadas"] == 1
