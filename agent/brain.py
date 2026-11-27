@@ -14,7 +14,13 @@ from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 
 from agent.calendario import texto_calendario
-from agent.catalogo import PAQUETES_PUEBLA, VIDEOS_TOY_STORY, ZONAS_PUEBLA, ids_validos
+from agent.catalogo import (
+    PAQUETES_PUEBLA,
+    VIDEOS_TOY_STORY,
+    ZONAS_PUEBLA,
+    ids_validos,
+    texto_stock,
+)
 
 load_dotenv()
 logger = logging.getLogger("agentkit")
@@ -382,6 +388,10 @@ async def generar_respuesta(
         system_prompt += "\n\n" + await texto_calendario(modo)
     except Exception as e:  # noqa: BLE001 — sin calendario Rory contesta igual
         logger.error(f"No se pudo armar el calendario: {e}")
+    try:
+        system_prompt += "\n\n" + texto_stock(modo)
+    except Exception as e:  # noqa: BLE001 — sin existencias Rory contesta igual
+        logger.error(f"No se pudo armar el bloque de existencias: {e}")
     extras = {"output_config": {"effort": ESFUERZO}} if (_soporta_esfuerzo and ESFUERZO) else {}
 
     async def _llamar(parametros_extra: dict):
