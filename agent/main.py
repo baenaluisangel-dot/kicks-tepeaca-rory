@@ -66,6 +66,7 @@ from agent.memory import (
     listar_rutas,
     metricas,
     registrar_aviso,
+    cancelar_envios_de,
     registrar_mensaje_cliente,
     transcripcion,
     ultimo_aviso_por_telefono,
@@ -97,6 +98,7 @@ from agent.notificar import (
     enlace_cliente,
     registrar_webhook,
 )
+from agent.despachador import bucle_despachador
 from agent.hoja import router as hoja_router
 from agent.voz import bucle_clasificar, bucle_voz_semanal
 from agent.panel import bucle_resumen_diario, fecha_bonita, fecha_hoy_iso, router as panel_router
@@ -158,6 +160,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(bucle_resumen_diario())
     asyncio.create_task(bucle_voz_semanal())
     asyncio.create_task(bucle_clasificar())
+    asyncio.create_task(bucle_despachador(lambda: proveedor))
     logger.info(f"Servidor AgentKit escuchando en el puerto {PORT}")
 
     global estado_proveedor
@@ -441,8 +444,13 @@ async def _aceptar_mensaje(msg: MensajeEntrante) -> bool:
             _ultimos_textos.pop(k, None)
 
     await registrar_mensaje_cliente(
-        msg.telefono, msg.contexto.get("plataforma", "whatsapp"), msg.texto
+        msg.telefono, msg.contexto.get("plataforma", "whatsapp"), msg.texto, msg.contexto
     )
+    # El cliente contesto: lo que quedaba programado para insistirle ya no tiene
+    # sentido, y mandarlo encima de su mensaje queda muy mal.
+    cancelados = await cancelar_envios_de(msg.telefono)
+    if cancelados:
+        logger.info(f"{cancelados} envios cancelados: {msg.telefono} contesto")
     if await esta_pausada(msg.telefono):
         logger.info(f"Mensaje de {msg.telefono} sin contestar: Rory esta en pausa ahi")
         # El cliente sigue escribiendo y esta esperando a una persona: recordatorio
