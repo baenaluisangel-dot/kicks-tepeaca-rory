@@ -95,6 +95,7 @@ from agent.notificar import (
     confirmar_toque,
     editar_aviso,
     enlace_cliente,
+    registrar_webhook,
 )
 from agent.hoja import router as hoja_router
 from agent.voz import bucle_clasificar, bucle_voz_semanal
@@ -158,6 +159,15 @@ async def lifespan(app: FastAPI):
         logger.info(f"Conexion con el proveedor: {'OK' if ok else 'ERROR'} — {detalle}")
     else:
         logger.error(f"Proveedor de WhatsApp NO configurado: {error_configuracion}")
+
+    # Los botones de Telegram no sirven de nada si Telegram no sabe a donde mandar el
+    # toque. Se registra en cada arranque: setWebhook es idempotente, y si falla el
+    # agente arranca igual, solo que sin poder recibir aprobaciones.
+    ok_tg, detalle_tg = await registrar_webhook()
+    if ok_tg:
+        logger.info(f"Webhook de Telegram registrado: {detalle_tg}")
+    else:
+        logger.warning(f"Webhook de Telegram NO registrado: {detalle_tg}")
 
     yield
 

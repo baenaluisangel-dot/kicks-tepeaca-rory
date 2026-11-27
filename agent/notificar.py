@@ -122,3 +122,46 @@ def chat_autorizado(chat_id) -> bool:
     """
     esperado = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     return bool(esperado) and str(chat_id).strip() == esperado
+
+
+async def registrar_webhook() -> tuple[bool, str]:
+    """
+    Le dice a Telegram a donde mandar los toques de los botones.
+
+    Lo hace la app al arrancar, con el token que ya tiene en el entorno, para que
+    nadie tenga que copiar el token a mano a una terminal. setWebhook es idempotente:
+    llamarlo en cada arranque no rompe nada.
+
+    Solo pide callback_query: los mensajes que alguien le escriba al bot no nos
+    interesan y no tiene caso recibirlos.
+    """
+    url = _api("setWebhook")
+    secreto = (os.getenv("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    base = (os.getenv("PUBLIC_BASE_URL") or "").strip()
+    if not base and os.getenv("RAILWAY_PUBLIC_DOMAIN"):
+        base = f"https://{os.environ['RAILWAY_PUBLIC_DOMAIN']}"
+
+    if not url:
+        return False, "falta TELEGRAM_BOT_TOKEN"
+    if not secreto:
+        return False, "falta TELEGRAM_WEBHOOK_SECRET: sin el, el endpoint no se registra"
+    if not base:
+        return False, "no hay URL publica (PUBLIC_BASE_URL ni RAILWAY_PUBLIC_DOMAIN)"
+
+    destino = f"{base.rstrip('/')}/telegram"
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            r = await http.post(url, json={
+                "url": destino,
+                "secret_token": secreto,
+                "allowed_updates": ["callback_query"],
+                # Al registrar por primera vez puede haber toques viejos encolados:
+                # entregarlos resolveria esperas que ya no tienen sentido.
+                "drop_pending_updates": True,
+            })
+    except Exception as e:  # noqa: BLE001
+        return False, f"no se pudo contactar a Telegram: {type(e).__name__}"
+
+    if r.status_code != 200:
+        return False, f"Telegram respondio {r.status_code}: {r.text[:200]}"
+    return True, f"webhook en {destino}"
