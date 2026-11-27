@@ -1,5 +1,6 @@
 # agent/calendario.py — La fecha de hoy y los dias de entrega, para que Rory no adivine
 
+import os
 from datetime import datetime, timedelta, timezone
 
 from agent.memory import dias_disponibles, obtener_config_ruta
@@ -49,4 +50,28 @@ async def texto_calendario(modo: str) -> str:
     puntos = "; ".join(f"{p['zona']}: {p['punto']}" for p in cfg["paradas"] if p.get("punto"))
     if puntos:
         lineas.append(f"Puntos de entrega por zona: {puntos}.")
+
+    empujar = (os.getenv("EMPUJAR_FECHA") or "").strip()
+    if empujar and empujar in por_fecha:
+        d = date_from_iso(empujar)
+        cuando = "HOY" if d == hoy else "MAÑANA" if d == manana else nombre_dia(d)
+        zonas = ", ".join(por_fecha[empujar])
+        lineas.append("")
+        lineas.append("## Fecha prioritaria (empuja esta primero)")
+        lineas.append(
+            f"Hay lugares libres {cuando} ({empujar}) en: {zonas}. Ofrece ESA fecha primero, "
+            "con naturalidad, como la más pronta en la que puede tenerlo. Solo después menciona "
+            "las otras. Si el cliente prefiere otro día, agéndaselo sin insistir: una venta "
+            "agendada tarde vale mucho más que una venta perdida por presionar."
+        )
+        lineas.append(
+            "No inventes urgencia: los lugares son reales y limitados, pero nunca digas que "
+            "quedan menos de los que de verdad quedan, ni que el precio sube, ni pongas una "
+            "fecha límite que no exista."
+        )
     return "\n".join(lineas)
+
+
+def date_from_iso(s: str):
+    from datetime import date
+    return date.fromisoformat(s)
