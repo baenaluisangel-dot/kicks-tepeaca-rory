@@ -316,9 +316,9 @@ async def panel_resumen(token: str = "", ok: str = ""):
 @router.get("/panel/conversaciones", response_class=HTMLResponse)
 async def panel_conversaciones(token: str = "", ok: str = ""):
     _exigir(token)
-    todas = await listar_atencion()
+    todas = await listar_atencion(limite=5000)  # todas: hay que poder buscar a cualquier cliente
     filas = ""
-    for c in todas[:300]:
+    for c in todas:
         clave, texto_estado, clase = _estado(c)
         hora = _aware(c["ultimo_en"]).astimezone(zona_mx()).strftime("%d/%m %H:%M")
         filas += (
@@ -339,7 +339,7 @@ async def panel_conversaciones(token: str = "", ok: str = ""):
     )
     js = """<script>
 let f='todas';const q=document.getElementById('q');
-function aplicar(){const t=q.value.toLowerCase();document.querySelectorAll('#lista .conv').forEach(r=>{
+function aplicar(){let t=q.value.toLowerCase().trim();if(/^[+0-9 ()-]{7,}$/.test(t))t=t.replace(/[^0-9]/g,'').slice(-10);document.querySelectorAll('#lista .conv').forEach(r=>{
  r.style.display=((f==='todas'||r.dataset.estado===f)&&(!t||r.dataset.q.includes(t)))?'':'none'})}
 q.addEventListener('input',aplicar);
 document.querySelectorAll('#filtros .chip').forEach(c=>c.addEventListener('click',()=>{f=c.dataset.f;
@@ -950,8 +950,10 @@ def _tarjeta_hoja(request: Request) -> str:
         filas += (f'<p style="margin:10px 0 4px"><b>Pestaña “{pestana}”</b>, celda A1:</p>'
                   f'<input readonly onclick="this.select()" value="{html.escape(formula)}" style="width:100%">')
     return ('<details class="card" style="margin-bottom:12px"><summary><b>📊 Conectar con Google Sheets</b></summary>'
-            f'{filas}<p style="margin:10px 0 0">No incluye nombres ni teléfonos. Quien tenga estas fórmulas puede '
-            'leer esos datos: compártelas solo con tu equipo.</p></details>')
+            f'{filas}<p style="margin:10px 0 0">La pestaña “Calificadas” incluye teléfonos de clientes. Quien tenga '
+            'estas fórmulas o la hoja puede verlos: compártelas solo con tu equipo.</p>'
+            '<p style="margin:8px 0 0">¿Un cliente ya te compró? Copia su número, búscalo en Conversaciones, '
+            'pulsa “Ver chat” y anota la venta. No la escribas en la hoja: se actualiza sola.</p></details>')
 
 
 @router.get("/panel/voz", response_class=HTMLResponse)

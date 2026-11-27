@@ -7,8 +7,9 @@ Dos tablas en CSV que Google Sheets lee sola con IMPORTDATA:
   agendo o compro.
 - Resumen diario: un conteo por dia y anuncio de TODAS las conversaciones.
 
-No salen nombres ni telefonos. Cada conversacion lleva un codigo anonimo y estable.
-La direccion se protege con una clave propia, de solo lectura, distinta a la del panel.
+No salen nombres. El telefono sale solo en "Calificadas" (por decision del dueño, para
+ubicar al cliente y anotar su venta en el panel). Cada conversacion lleva ademas un codigo
+anonimo y estable. La direccion se protege con una clave propia, de solo lectura, distinta a la del panel.
 """
 
 import csv
@@ -29,7 +30,7 @@ from agent.voz import _aware, _canal, zona_mx
 router = APIRouter()
 
 COLUMNAS_CALIFICADAS = [
-    "fecha", "conversacion", "canal", "ad_id", "ad_name", "campaign_name", "zona", "en_zona",
+    "fecha", "conversacion", "telefono", "canal", "ad_id", "ad_name", "campaign_name", "zona", "en_zona",
     "producto_elegido", "agendo", "fecha_entrega", "zona_entrega", "venta_mxn", "resultado",
     "objecion", "dudas", "frases", "ultimo_mensaje",
 ]
@@ -48,6 +49,16 @@ def clave_hoja() -> str:
 
 def _codigo(telefono: str) -> str:
     return "C-" + hmac.new(clave_hoja().encode(), telefono.encode(), hashlib.sha256).hexdigest()[:8]
+
+
+def _telefono(telefono: str) -> str:
+    """El numero como se marca en Mexico (10 digitos). Instagram y Facebook no traen numero."""
+    if not telefono.isdigit():
+        return ""
+    for prefijo, largo in (("521", 13), ("52", 12)):
+        if telefono.startswith(prefijo) and len(telefono) == largo:
+            return telefono[len(prefijo):]
+    return telefono
 
 
 def _campo(datos: str, clave: str) -> str:
@@ -125,6 +136,7 @@ async def conversaciones() -> list[dict]:
             "fecha": _aware(c["inicio"]).astimezone(zona_mx()).strftime("%Y-%m-%d"),
             "ultimo_mensaje": _aware(c["ultimo"]).astimezone(zona_mx()).strftime("%Y-%m-%d %H:%M"),
             "conversacion": _codigo(tel),
+            "telefono": _telefono(tel),
             "canal": _canal(tel),
             # Con prefijo: como numero, Sheets redondea los ID de 18 digitos y ya no cruzan con Meta
             "ad_id": f"ad:{o.anuncio_id}" if o and o.anuncio_id else "sin_dato",
