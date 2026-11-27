@@ -79,9 +79,23 @@ from agent.memory import (
     marcar_evento_procesado,
     obtener_historial,
 )
+from agent.memory import (  # cola de aprobaciones y bitacora
+    crear_espera,
+    guardar_mensaje_telegram,
+    listar_esperas,
+    registrar_bitacora,
+    resolver_espera,
+)
 from agent import calendario, interactivo
 from agent.audio import transcribir
-from agent.notificar import avisar_por_telegram, enlace_cliente
+from agent.notificar import (
+    avisar_con_botones,
+    avisar_por_telegram,
+    chat_autorizado,
+    confirmar_toque,
+    editar_aviso,
+    enlace_cliente,
+)
 from agent.hoja import router as hoja_router
 from agent.voz import bucle_clasificar, bucle_voz_semanal
 from agent.panel import bucle_resumen_diario, fecha_bonita, fecha_hoy_iso, router as panel_router
@@ -259,6 +273,99 @@ async def webhook_handler(request: Request, tareas: BackgroundTasks):
             encolados += 1
 
     return {"status": "ok", "encolados": encolados}
+
+
+@app.post("/telegram")
+async def telegram_webhook(request: Request):
+    """
+    Recibe el toque de un boton de Telegram y resuelve la espera correspondiente.
+
+    Dos barreras, porque este endpoint aprueba decisiones de negocio:
+      1. El secreto del webhook, que solo conocen Telegram y nosotros.
+      2. El chat: solo el de Luisito decide. Cualquier otro se descarta.
+    """
+    secreto = (os.getenv("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    if secreto and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != secreto:
+        logger.warning("Webhook de Telegram con secreto invalido: rechazado")
+        raise HTTPException(status_code=401, detail="Secreto invalido")
+
+    try:
+        cuerpo = await request.json()
+    except Exception:  # noqa: BLE001 — un payload roto no debe reintentarse para siempre
+        return {"status": "ignorado"}
+
+    toque = cuerpo.get("callback_query")
+    if not toque:
+        return {"status": "ignorado"}  # mensajes normales al bot: no hacemos nada
+
+    chat = ((toque.get("message") or {}).get("chat") or {}).get("id")
+    if not chat_autorizado(chat):
+        logger.warning(f"Toque de Telegram desde un chat no autorizado: {chat}")
+        await confirmar_toque(toque.get("id", ""), "No autorizado")
+        return {"status": "no autorizado"}
+
+    dato = toque.get("data") or ""
+    if not dato.startswith("e:"):
+        await confirmar_toque(toque.get("id", ""))
+        return {"status": "ignorado"}
+
+    # callback_data llega como "e:<id>:<clave>"
+    partes = dato[2:].split(":", 1)
+    try:
+        espera_id = int(partes[0])
+    except (ValueError, IndexError):
+        await confirmar_toque(toque.get("id", ""))
+        return {"status": "ignorado"}
+    clave = partes[1] if len(partes) > 1 else ""
+
+    fila = await resolver_espera(espera_id, clave)
+    if fila is None:
+        # Ya la habia contestado: dos toques seguidos no la resuelven dos veces
+        await confirmar_toque(toque.get("id", ""), "Ya estaba contestada")
+        return {"status": "ya resuelta"}
+
+    await confirmar_toque(toque.get("id", ""), "Listo")
+    mensaje = (toque.get("message") or {}).get("message_id") or fila.get("mensaje_telegram")
+    if mensaje:
+        await editar_aviso(int(mensaje), f"{fila['asunto']}\n\nRespondiste: {clave}")
+    await registrar_bitacora(fila["agente"], f"espera {espera_id} resuelta",
+                             f"Luisito respondio: {clave}", "ok")
+    logger.info(f"Espera {espera_id} resuelta por Telegram: {clave}")
+    return {"status": "ok", "espera": espera_id, "respuesta": clave}
+
+
+async def pedir_aprobacion(
+    agente: str,
+    asunto: str,
+    detalle: str = "",
+    opciones: list[dict] | None = None,
+    costo_esperar: int = 0,
+    telefono: str = "",
+) -> int:
+    """
+    Encola una decision para Luisito y se la manda por Telegram con botones.
+    Es la unica via por la que un agente pide permiso: asi nada queda solo en un
+    aviso que se pierde en el scroll.
+    """
+    opciones = opciones or [{"clave": "si", "etiqueta": "Sí"}, {"clave": "no", "etiqueta": "No"}]
+    espera_id = await crear_espera(agente, asunto, detalle, opciones, costo_esperar, telefono)
+
+    lineas = [f"{agente} necesita tu visto bueno", "", asunto]
+    if detalle:
+        lineas += ["", detalle]
+    if costo_esperar:
+        lineas += ["", f"Cuesta esperar: ${costo_esperar:,}"]
+    if telefono:
+        lineas += ["", enlace_cliente(telefono, "whatsapp")]
+
+    # La clave del boton viaja con el id de la espera, para no depender de cual fue la ultima
+    botones = [{"clave": f"{espera_id}:{o['clave']}", "etiqueta": o["etiqueta"]} for o in opciones]
+    mensaje_id = await avisar_con_botones("\n".join(lineas), botones)
+    if mensaje_id:
+        await guardar_mensaje_telegram(espera_id, mensaje_id)
+    else:
+        logger.warning(f"Espera {espera_id} quedo encolada pero no se pudo avisar por Telegram")
+    return espera_id
 
 
 async def avisar_dueno(texto: str):

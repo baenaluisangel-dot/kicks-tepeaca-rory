@@ -936,3 +936,142 @@ async def limpiar_historial(telefono: str):
     async with async_session() as session:
         await session.execute(delete(Mensaje).where(Mensaje.telefono == telefono))
         await session.commit()
+
+
+# ── Cola de aprobaciones y bitacora ──────────────────────────────────────────
+# Un aviso de Telegram es texto que se pierde en el scroll: si Luisito no contesta
+# en ese momento, no queda en ningun lado que algo sigue detenido esperandolo.
+# Estas dos tablas son la diferencia entre avisar y llevar la cuenta.
+
+
+class Espera(Base):
+    """Algo detenido esperando una decision de Luisito."""
+
+    __tablename__ = "esperando"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agente: Mapped[str] = mapped_column(String(30), index=True)
+    asunto: Mapped[str] = mapped_column(Text)                 # que se le pide aprobar
+    detalle: Mapped[str] = mapped_column(Text, default="")    # contexto para decidir
+    opciones: Mapped[str] = mapped_column(Text, default="[]")  # JSON: [{clave, etiqueta}]
+    # Pesos que se dejan de ganar si esto no se contesta. Ordenar por aqui y no por
+    # fecha es lo que hace util la cola: lo viejo no siempre es lo que mas cuesta.
+    costo_esperar: Mapped[int] = mapped_column(Integer, default=0)
+    telefono: Mapped[str] = mapped_column(String(50), default="", index=True)
+    estado: Mapped[str] = mapped_column(String(20), default="pendiente", index=True)
+    respuesta: Mapped[str] = mapped_column(String(40), default="")
+    mensaje_telegram: Mapped[int] = mapped_column(Integer, default=0)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
+    resuelto_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Bitacora(Base):
+    """Que hizo cada agente en cada ejecucion. Un agente que no hizo nada tambien
+    escribe aqui: el silencio es indistinguible de una falla."""
+
+    __tablename__ = "bitacora"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agente: Mapped[str] = mapped_column(String(30), index=True)
+    accion: Mapped[str] = mapped_column(Text)
+    motivo: Mapped[str] = mapped_column(Text, default="")
+    resultado: Mapped[str] = mapped_column(String(20), default="ok")  # ok | escalado | error
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
+
+
+async def crear_espera(
+    agente: str,
+    asunto: str,
+    detalle: str = "",
+    opciones: list[dict] | None = None,
+    costo_esperar: int = 0,
+    telefono: str = "",
+) -> int:
+    """Encola una decision y devuelve su id. Las opciones son [{clave, etiqueta}]."""
+    import json
+    async with async_session() as session:
+        fila = Espera(
+            agente=agente, asunto=asunto, detalle=detalle,
+            opciones=json.dumps(opciones or [], ensure_ascii=False),
+            costo_esperar=int(costo_esperar), telefono=telefono or "",
+            estado="pendiente", creado_en=ahora(),
+        )
+        session.add(fila)
+        await session.commit()
+        return fila.id
+
+
+async def listar_esperas(estado: str = "pendiente", limite: int = 50) -> list[dict]:
+    """Lo detenido, lo que mas cuesta primero."""
+    import json
+    async with async_session() as session:
+        consulta = select(Espera).order_by(Espera.costo_esperar.desc(), Espera.creado_en).limit(limite)
+        if estado:
+            consulta = consulta.where(Espera.estado == estado)
+        filas = (await session.execute(consulta)).scalars().all()
+    salida = []
+    for f in filas:
+        try:
+            opciones = json.loads(f.opciones or "[]")
+        except ValueError:
+            opciones = []
+        salida.append({
+            "id": f.id, "agente": f.agente, "asunto": f.asunto, "detalle": f.detalle,
+            "opciones": opciones, "costo_esperar": f.costo_esperar, "telefono": f.telefono,
+            "estado": f.estado, "respuesta": f.respuesta, "creado_en": f.creado_en,
+            "mensaje_telegram": f.mensaje_telegram,
+        })
+    return salida
+
+
+async def obtener_espera(espera_id: int) -> dict | None:
+    filas = [e for e in await listar_esperas(estado="", limite=1000) if e["id"] == espera_id]
+    return filas[0] if filas else None
+
+
+async def resolver_espera(espera_id: int, respuesta: str) -> dict | None:
+    """
+    Marca una espera como resuelta. Devuelve la fila, o None si no existe o si alguien
+    ya la contesto: asi dos toques seguidos del mismo boton no la resuelven dos veces.
+    """
+    async with async_session() as session:
+        fila = await session.get(Espera, espera_id)
+        if fila is None or fila.estado != "pendiente":
+            return None
+        fila.estado = "resuelta"
+        fila.respuesta = respuesta[:40]
+        fila.resuelto_en = ahora()
+        await session.commit()
+        return {"id": fila.id, "agente": fila.agente, "asunto": fila.asunto,
+                "respuesta": fila.respuesta, "mensaje_telegram": fila.mensaje_telegram,
+                "costo_esperar": fila.costo_esperar}
+
+
+async def guardar_mensaje_telegram(espera_id: int, mensaje_telegram: int):
+    """Guarda el id del mensaje de Telegram para poder editarlo cuando se conteste."""
+    async with async_session() as session:
+        fila = await session.get(Espera, espera_id)
+        if fila is not None:
+            fila.mensaje_telegram = int(mensaje_telegram)
+            await session.commit()
+
+
+async def registrar_bitacora(agente: str, accion: str, motivo: str = "", resultado: str = "ok"):
+    """Deja constancia de una ejecucion. Nunca revienta al que la llama."""
+    try:
+        async with async_session() as session:
+            session.add(Bitacora(agente=agente, accion=accion, motivo=motivo,
+                                 resultado=resultado, creado_en=ahora()))
+            await session.commit()
+    except Exception as e:  # noqa: BLE001 — la bitacora no debe tumbar al agente
+        logger.error(f"No se pudo escribir en la bitacora: {e}")
+
+
+async def listar_bitacora(limite: int = 50, agente: str = "") -> list[dict]:
+    async with async_session() as session:
+        consulta = select(Bitacora).order_by(Bitacora.id.desc()).limit(limite)
+        if agente:
+            consulta = consulta.where(Bitacora.agente == agente)
+        filas = (await session.execute(consulta)).scalars().all()
+    return [{"id": f.id, "agente": f.agente, "accion": f.accion, "motivo": f.motivo,
+             "resultado": f.resultado, "creado_en": f.creado_en} for f in filas]
