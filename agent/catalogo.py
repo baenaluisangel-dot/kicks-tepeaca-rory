@@ -111,7 +111,8 @@ PAQUETES_PUEBLA: dict[str, list[str]] = {
 }
 
 
-ZONAS_PUEBLA = ["Angelópolis", "Valsequillo", "Peri Plaza", "CAPU", "CU", "Centro", "Amozoc"]
+ZONAS_PUEBLA = ["Angelópolis", "Valsequillo", "Peri Plaza", "CAPU", "CU", "Centro",
+                "Amozoc", "Chachapa", "Amalucan"]
 
 
 # Videos de los juguetes Toy Story (static/videos, MP4 H.264). La clave es lo que ve Claude.
@@ -143,3 +144,86 @@ ARCHIVO_AUDIO_BIENVENIDA = "bienvenida.ogg"
 def url_audio(archivo: str) -> str | None:
     base = url_base()
     return f"{base}/audios/{archivo}" if base else None
+
+
+# --- Existencias -------------------------------------------------------------
+# El catalogo trae "stock" (piezas) y "costo" por producto. Sin esto Rory prometia
+# cosas que ya no habia (el Buzz del Duo, la Coleccion Completa sin Tiro al Blanco).
+
+UMBRAL_ULTIMAS = 3   # de 1 a 3 piezas: se puede vender, pero hay que confirmar antes
+
+
+def stock(producto_id: str) -> int:
+    """Piezas fisicas en almacen."""
+    p = PRODUCTOS.get((producto_id or "").strip())
+    return int(p.get("stock", 0)) if p else 0
+
+
+def comprometido(producto_id: str) -> int:
+    """Piezas ya agendadas y no entregadas."""
+    p = PRODUCTOS.get((producto_id or "").strip())
+    return int(p.get("comprometido", 0)) if p else 0
+
+
+def disponible(producto_id: str) -> int:
+    """Lo que de verdad se puede vender hoy."""
+    return max(0, stock(producto_id) - comprometido(producto_id))
+
+
+def estado_stock(producto_id: str) -> str:
+    """agotado | ultimas | ok"""
+    n = disponible(producto_id)
+    if n <= 0:
+        return "agotado"
+    return "ultimas" if n <= UMBRAL_ULTIMAS else "ok"
+
+
+def estado_paquete(nombre_paquete: str) -> str:
+    """Un paquete vale lo que su pieza mas escasa."""
+    ids = PAQUETES_PUEBLA.get(nombre_paquete)
+    if not ids:
+        return "ok"
+    estados = [estado_stock(i) for i in ids]
+    if "agotado" in estados:
+        return "agotado"
+    return "ultimas" if "ultimas" in estados else "ok"
+
+
+def texto_stock(modo: str = "") -> str:
+    """
+    Bloque para el system prompt. No repite el catalogo: solo lo que el modelo no
+    puede saber solo. En Puebla se acota a Toy Story para no inflar el prompt.
+    """
+    def nombre(pid: str) -> str:
+        return PRODUCTOS[pid]["nombre"]
+
+    es_puebla = modo == "puebla"
+    universo = [pid for pid, p in PRODUCTOS.items()
+                if not es_puebla or p.get("categoria") == "Toy Story"]
+
+    agotados = [nombre(i) for i in universo if estado_stock(i) == "agotado"]
+    ultimas = [f"{nombre(i)} ({disponible(i)})" for i in universo if estado_stock(i) == "ultimas"]
+
+    lineas = ["## Existencias (dato del sistema: manda sobre el catalogo de arriba)"]
+    if agotados:
+        lineas.append("AGOTADOS. No los ofrezcas, no los prometas y no los metas en ningun "
+                      "paquete. Si te los piden, dilo de una vez y ofrece lo mas parecido "
+                      "que si haya: " + "; ".join(sorted(agotados)) + ".")
+    if ultimas:
+        lineas.append(f"ULTIMAS PIEZAS (queda lo que dice el parentesis). Se venden, pero "
+                      "nunca prometas varias ni apartes mas de las que quedan: "
+                      + "; ".join(sorted(ultimas)) + ".")
+    if es_puebla:
+        bloqueados = [n for n in PAQUETES_PUEBLA if estado_paquete(n) == "agotado"]
+        limitados = [n for n in PAQUETES_PUEBLA if estado_paquete(n) == "ultimas"]
+        if bloqueados:
+            lineas.append("PAQUETES QUE NO SE PUEDEN SURTIR: " + "; ".join(bloqueados)
+                          + ". No los ofrezcas ni los menciones como opcion.")
+        if limitados:
+            lineas.append("PAQUETES AL LIMITE: " + "; ".join(limitados)
+                          + ". Ofrecelos, pero di que quedan pocos y confirma antes de agendar.")
+        lineas.append("De otras lineas (Barbie, Hot Wheels, Cars, preescolar, rompecabezas) "
+                      "muchos modelos tienen de 1 a 3 piezas: antes de apartar o agendar uno, "
+                      "confirma con avisar_equipo.")
+    lineas.append("Nunca inventes existencias. Ante la duda, avisar_equipo en vez de prometer.")
+    return "\n".join(lineas)

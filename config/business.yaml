@@ -21,7 +21,7 @@ agente:
     - "Pasar la conversación a una persona cuando haya que confirmar existencias, un pago o resolver un problema"
 
 apartados:
-  duracion_maxima_dias: 30
+  duracion_maxima_dias: 15
   anticipo_porcentaje: 25
   paquetes: [3, 5, 10]
 
