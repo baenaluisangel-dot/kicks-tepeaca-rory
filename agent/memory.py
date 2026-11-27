@@ -682,6 +682,9 @@ class Etiqueta(Base):
     objecion: Mapped[str] = mapped_column(String(40), default="ninguna")
     resultado: Mapped[str] = mapped_column(String(30), default="en_curso")
     frases: Mapped[str] = mapped_column(Text, default="[]")      # JSON: frases textuales del cliente
+    zona: Mapped[str] = mapped_column(String(60), default="")             # donde dijo estar
+    en_zona: Mapped[str] = mapped_column(String(10), default="")          # si | no | no_dijo ("" = sin leer)
+    producto_elegido: Mapped[str] = mapped_column(String(80), default="")  # lo que dijo querer
     ultimo_msg_id: Mapped[int] = mapped_column(Integer, default=0)
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora, index=True)
 
@@ -829,11 +832,16 @@ async def inicializar_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     # create_all no agrega columnas a una tabla vieja: se hace a mano, una por una
-    sentencias = (
-        ["ALTER TABLE entregas ADD COLUMN IF NOT EXISTS suelto BOOLEAN DEFAULT FALSE"]
-        if engine.dialect.name == "postgresql"
-        else ["ALTER TABLE entregas ADD COLUMN suelto BOOLEAN DEFAULT 0"]
-    )
+    existe = "IF NOT EXISTS " if engine.dialect.name == "postgresql" else ""
+    sentencias = [
+        f"ALTER TABLE {tabla} ADD COLUMN {existe}{columna}"
+        for tabla, columna in (
+            ("entregas", "suelto BOOLEAN DEFAULT FALSE"),
+            ("etiquetas", "zona VARCHAR(60) DEFAULT ''"),
+            ("etiquetas", "en_zona VARCHAR(10) DEFAULT ''"),
+            ("etiquetas", "producto_elegido VARCHAR(80) DEFAULT ''"),
+        )
+    ]
     from sqlalchemy import text as _sql
     for sentencia in sentencias:
         try:

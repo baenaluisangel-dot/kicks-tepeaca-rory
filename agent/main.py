@@ -82,7 +82,8 @@ from agent.memory import (
 from agent import calendario, interactivo
 from agent.audio import transcribir
 from agent.notificar import avisar_por_telegram, enlace_cliente
-from agent.voz import bucle_voz_semanal
+from agent.hoja import router as hoja_router
+from agent.voz import bucle_clasificar, bucle_voz_semanal
 from agent.panel import bucle_resumen_diario, fecha_bonita, fecha_hoy_iso, router as panel_router
 from agent.providers import obtener_proveedor
 from agent.providers.base import MensajeEntrante
@@ -132,6 +133,7 @@ async def lifespan(app: FastAPI):
     await recuperar_pendientes()
     asyncio.create_task(bucle_resumen_diario())
     asyncio.create_task(bucle_voz_semanal())
+    asyncio.create_task(bucle_clasificar())
     logger.info(f"Servidor AgentKit escuchando en el puerto {PORT}")
 
     global estado_proveedor
@@ -151,6 +153,7 @@ _ultimo_recordatorio: dict[str, float] = {}
 
 app = FastAPI(title="AgentKit — WhatsApp AI Agent", version="2.0.0", lifespan=lifespan)
 app.include_router(panel_router)
+app.include_router(hoja_router)
 
 # Fotos de los productos. WhatsApp las descarga de aqui, asi que tienen que ser publicas.
 app.mount("/fotos", StaticFiles(directory="static/fotos"), name="fotos")

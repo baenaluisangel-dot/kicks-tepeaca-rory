@@ -46,6 +46,7 @@ DUDAS = ["medidas", "voz_o_sonidos", "pilas", "originalidad", "precio", "costo_e
 OBJECIONES = ["precio_alto", "zona_no_cubierta", "horario_no_le_sirve", "desconfianza",
               "lo_va_a_pensar", "sin_motivo_claro", "ninguna"]
 RESULTADOS = ["compro_o_agendo", "en_curso", "se_enfrio", "solo_curioseo", "queja"]
+EN_ZONA = ["si", "no", "no_dijo"]
 
 NOMBRES_DUDA = {
     "medidas": "¿Cuánto mide?", "voz_o_sonidos": "¿Habla / hace sonidos?", "pilas": "¿Trae pilas?",
@@ -80,8 +81,14 @@ HERRAMIENTA_ETIQUETA = {
             "resultado": {"type": "string", "enum": RESULTADOS},
             "frases": {"type": "array", "items": {"type": "string"},
                        "description": "Hasta 3 frases TEXTUALES y utiles del cliente (preguntas, dudas, como pide las cosas). Sin nombres propios, telefonos ni direcciones."},
+            "zona": {"type": "string",
+                     "description": "Zona, colonia o municipio donde el cliente dijo estar o querer recibir. Solo el nombre del lugar, sin calle ni numero. Vacio si no lo dijo."},
+            "en_zona": {"type": "string", "enum": EN_ZONA,
+                        "description": "'si': su lugar o el punto que acepto esta cubierto (WhatsApp: entrega en Amozoc, Valsequillo, CU, Peri Plaza, Angelopolis, Centro o CAPU, o cualquier punto de la ciudad de Puebla; Instagram y Facebook: puede ir a la tienda en Tepeaca). 'no': esta fuera de cobertura, pide envio a otra ciudad o ningun punto le sirve. 'no_dijo': no hay forma de saberlo."},
+            "producto_elegido": {"type": "string",
+                                 "description": "El juguete o paquete que el cliente dijo querer o escogio. Vacio si solo pidio informacion o precios sin inclinarse por ninguno."},
         },
-        "required": ["productos", "dudas", "objecion", "resultado", "frases"],
+        "required": ["productos", "dudas", "objecion", "resultado", "frases", "zona", "en_zona", "producto_elegido"],
     },
 }
 
@@ -143,6 +150,25 @@ def _aware(d: datetime) -> datetime:
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
+async def _pedir_registro(sistema: str, contenido: str, herramienta: dict, max_tokens: int) -> dict:
+    """
+    Pide a Claude que conteste con la herramienta y devuelve sus datos.
+
+    El modelo no acepta que se le fuerce una herramienta (tool_choice "tool"), asi que se le
+    pide en las instrucciones. Si contesta con puro texto, se intenta una vez mas.
+    """
+    orden = f"\n\nContesta unicamente llamando a la herramienta {herramienta['name']}, sin texto."
+    for _ in range(2):
+        resp = await client.messages.create(
+            model=MODELO, max_tokens=max_tokens, system=sistema + orden,
+            messages=[{"role": "user", "content": contenido}], tools=[herramienta],
+        )
+        datos = next((b.input for b in resp.content if b.type == "tool_use"), None)
+        if datos:
+            return datos
+    raise RuntimeError("Claude no entrego el registro")
+
+
 # ── 1. Etiquetar ─────────────────────────────────────────────────────────────
 
 async def _chats_por_etiquetar() -> list[tuple[str, int]]:
@@ -153,7 +179,9 @@ async def _chats_por_etiquetar() -> list[tuple[str, int]]:
             select(Mensaje.telefono, func.max(Mensaje.id), func.max(Mensaje.timestamp),
                    func.sum(case((Mensaje.role == "user", 1), else_=0))).group_by(Mensaje.telefono)
         )).all()
-        etiquetadas = dict((await session.execute(select(Etiqueta.telefono, Etiqueta.ultimo_msg_id))).all())
+        # Las etiquetas viejas sin zona (en_zona vacio) se vuelven a leer una vez
+        etiquetadas = dict((await session.execute(
+            select(Etiqueta.telefono, Etiqueta.ultimo_msg_id).where(Etiqueta.en_zona != ""))).all())
     limite = ahora() - timedelta(minutes=MIN_REPOSO_MIN)
     pendientes = []
     for tel, ultimo_id, ultima_hora, n_cliente in filas:
@@ -177,19 +205,16 @@ def _texto_chat(turnos: list[dict]) -> str:
     return "\n".join(lineas)[-8000:]
 
 
+def zona_mx():
+    return timezone(timedelta(hours=-6))
+
+
 async def _etiquetar_uno(tel: str, ultimo_id: int):
     turnos = await transcripcion(tel, limite=80)
     texto = _texto_chat(turnos)
     if not texto.strip():
         return
-    resp = await client.messages.create(
-        model=MODELO, max_tokens=1024, system=PROMPT_ETIQUETA,
-        messages=[{"role": "user", "content": texto}],
-        tools=[HERRAMIENTA_ETIQUETA], tool_choice={"type": "tool", "name": "registrar_etiqueta"},
-    )
-    datos = next((b.input for b in resp.content if b.type == "tool_use"), None)
-    if not datos:
-        return
+    datos = await _pedir_registro(PROMPT_ETIQUETA, f"Canal: {_canal(tel)}\n\n{texto}", HERRAMIENTA_ETIQUETA, 4096)
     async with async_session() as session:
         agendo = (await session.execute(select(Entrega.id).where(Entrega.telefono == tel).limit(1))).first()
         resultado = "compro_o_agendo" if agendo else datos.get("resultado", "en_curso")
@@ -208,7 +233,13 @@ async def _etiquetar_uno(tel: str, ultimo_id: int):
         fila.resultado = resultado
         fila.frases = json.dumps([_limpiar_frase(f) for f in datos.get("frases", [])][:3], ensure_ascii=False)
         fila.ultimo_msg_id = ultimo_id
-        fila.actualizado_en = ahora()
+        fila.zona = _limpiar_frase(datos.get("zona", ""))[:60]
+        en_zona = datos.get("en_zona", "no_dijo")
+        fila.en_zona = en_zona if en_zona in EN_ZONA else "no_dijo"
+        fila.producto_elegido = _limpiar_frase(datos.get("producto_elegido", ""))[:80]
+        # La fecha de la etiqueta es la de la conversacion, no la de la lectura: asi
+        # "ultimos 7 dias" no incluye chats viejos que se acaban de releer
+        fila.actualizado_en = turnos[-1]["hora"]
         await session.commit()
 
 
@@ -309,12 +340,8 @@ async def generar_informe(dias: int = 7) -> dict:
     muestra_chica = datos["conversaciones_analizadas"] < 30
     sintesis = {}
     if datos["conversaciones_analizadas"] > 0:
-        resp = await client.messages.create(
-            model=MODELO, max_tokens=3000, system=PROMPT_SINTESIS,
-            messages=[{"role": "user", "content": json.dumps(datos, ensure_ascii=False)}],
-            tools=[HERRAMIENTA_SINTESIS], tool_choice={"type": "tool", "name": "registrar_informe"},
-        )
-        sintesis = next((b.input for b in resp.content if b.type == "tool_use"), {}) or {}
+        sintesis = await _pedir_registro(PROMPT_SINTESIS, json.dumps(datos, ensure_ascii=False),
+                                         HERRAMIENTA_SINTESIS, 8000)
     contenido = {"metricas": datos, "sintesis": sintesis, "muestra_chica": muestra_chica}
     async with async_session() as session:
         fila = Informe(dias=dias, datos=json.dumps(contenido, ensure_ascii=False), creado_en=ahora())
@@ -347,6 +374,37 @@ async def analizar(dias: int = 7) -> dict | None:
         estado.update(activo=False, etapa="", fin=ahora())
 
 
+async def clasificar_pendientes() -> int:
+    """Lee todas las conversaciones pendientes, por tandas. No genera informe."""
+    if estado["activo"]:
+        return 0
+    estado.update(activo=True, etapa="Empezando", hechas=0, total=0, error="")
+    total = 0
+    try:
+        for _ in range(40):
+            hechas = await etiquetar_pendientes()
+            total += hechas
+            if hechas < MAX_POR_CORRIDA:
+                break
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"No se pudieron clasificar las conversaciones: {type(e).__name__}: {e}")
+        estado["error"] = f"{type(e).__name__}: {e}"[:300]
+    finally:
+        estado.update(activo=False, etapa="", fin=ahora())
+    return total
+
+
+async def bucle_clasificar():
+    """Cada pocas horas clasifica lo nuevo, para que la hoja de calculo este al dia."""
+    horas = float(os.getenv("HOJA_CADA_HORAS") or "3")
+    await asyncio.sleep(120)
+    while True:
+        n = await clasificar_pendientes()
+        if n:
+            logger.info(f"Conversaciones clasificadas para la hoja: {n}")
+        await asyncio.sleep(horas * 3600)
+
+
 def texto_telegram(contenido: dict) -> str:
     m, s = contenido.get("metricas", {}), contenido.get("sintesis", {})
     lineas = [f"🧠 Voz del cliente — últimos {m.get('dias', 7)} días",
@@ -366,7 +424,7 @@ async def bucle_voz_semanal():
     """Cada domingo a HORA_VOZ (hora de Mexico) analiza la semana y avisa por Telegram."""
     from agent.notificar import avisar_por_telegram
     hora = int(os.getenv("HORA_VOZ") or "20")
-    zona = timezone(timedelta(hours=-6))
+    zona = zona_mx()
     while True:
         ahora_mx = datetime.now(zona)
         objetivo = ahora_mx.replace(hour=hora, minute=0, second=0, microsecond=0)

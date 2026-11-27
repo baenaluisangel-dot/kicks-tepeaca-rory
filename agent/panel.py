@@ -17,7 +17,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from agent import interactivo, voz
+from agent import hoja, interactivo, voz
 from agent.brain import generar_respuesta
 from agent.catalogo import VIDEOS_TOY_STORY, ZONAS_PUEBLA, obtener_producto
 from agent.memory import (
@@ -940,8 +940,22 @@ def _ideas(titulo: str, icono: str, ideas: list) -> str:
     return f'<div class="card"><h3 style="margin:0 0 4px">{icono} {titulo}</h3><ul style="margin:0;padding-left:18px">{cuerpo}</ul></div>'
 
 
+def _tarjeta_hoja(request: Request) -> str:
+    """Las dos formulas que se pegan en Google Sheets para traer los datos."""
+    host = request.headers.get("host", "")
+    esquema = "http" if host.startswith(("localhost", "127.0.0.1")) else "https"
+    filas = ""
+    for pestana, archivo in (("Calificadas", "calificadas"), ("Resumen diario", "resumen")):
+        formula = f'=IMPORTDATA("{esquema}://{host}/hoja/{archivo}.csv?clave={hoja.clave_hoja()}")'
+        filas += (f'<p style="margin:10px 0 4px"><b>Pestaña “{pestana}”</b>, celda A1:</p>'
+                  f'<input readonly onclick="this.select()" value="{html.escape(formula)}" style="width:100%">')
+    return ('<details class="card" style="margin-bottom:12px"><summary><b>📊 Conectar con Google Sheets</b></summary>'
+            f'{filas}<p style="margin:10px 0 0">No incluye nombres ni teléfonos. Quien tenga estas fórmulas puede '
+            'leer esos datos: compártelas solo con tu equipo.</p></details>')
+
+
 @router.get("/panel/voz", response_class=HTMLResponse)
-async def panel_voz(token: str = "", ok: str = ""):
+async def panel_voz(request: Request, token: str = "", ok: str = ""):
     _exigir(token)
     est = voz.estado
     ultimo = await voz.ultimo_informe()
@@ -956,7 +970,7 @@ async def panel_voz(token: str = "", ok: str = ""):
         aviso = f'<div class="card stat alert" style="margin-bottom:12px">No se pudo analizar: {html.escape(est["error"])}</div>'
     else:
         aviso = ""
-    cuerpo = f'{aviso}<div class="toolbar">{acciones}</div>'
+    cuerpo = f'{aviso}<div class="toolbar">{acciones}</div>{_tarjeta_hoja(request)}'
     if not ultimo:
         cuerpo += ('<div class="card empty">Todavía no hay informe. Pulsa “Analizar ahora”: Rory lee las conversaciones '
                    'calmadas y arma las recomendaciones. Cada domingo a las 8 PM se hace solo y te llega un resumen por Telegram.</div>')
